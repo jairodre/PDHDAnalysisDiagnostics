@@ -1,0 +1,19 @@
+# DATA FHiCL template for PDHDBlipInventory.
+#
+# Reconstructed blip geometry, charge, energy, and source-product inventory.
+# The analyzer remains a C++ scaffold and must not be scheduled yet. Product labels below document the intended interface and must
+# be validated against the input production before implementation.
+
+#include "pdhd_analysis_diagnostics_data.fcl"
+
+BEGIN_PROLOG
+
+pdhd_blip_inventory_data_template: {
+  module_type: "PDHDBlipInventory"
+  Mode: "data"
+  ImplementationStatus: "template_only"
+  EnabledForMode: true
+  BlipTag: "blipreco"
+}
+
+END_PROLOG

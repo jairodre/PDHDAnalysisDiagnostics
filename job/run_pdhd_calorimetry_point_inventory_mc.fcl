@@ -1,0 +1,20 @@
+# MC FHiCL template for PDHDCalorimetryPointInventory.
+#
+# One row per reconstructed calorimetry point with units and calibration provenance.
+# The analyzer remains a C++ scaffold and must not be scheduled yet. Product labels below document the intended interface and must
+# be validated against the input production before implementation.
+
+#include "pdhd_analysis_diagnostics_mc.fcl"
+
+BEGIN_PROLOG
+
+pdhd_calorimetry_point_inventory_mc_template: {
+  module_type: "PDHDCalorimetryPointInventory"
+  Mode: "mc"
+  ImplementationStatus: "template_only"
+  EnabledForMode: true
+  TrackTag: "pandoraTrack"
+  CalorimetryTag: "pandoracalo"
+}
+
+END_PROLOG

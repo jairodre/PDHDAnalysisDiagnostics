@@ -1,0 +1,22 @@
+# DATA FHiCL template for PDHDRecoAssociation.
+#
+# Normalized association edges among PFPs, tracks, showers, hits, and clusters.
+# The analyzer remains a C++ scaffold and must not be scheduled yet. Product labels below document the intended interface and must
+# be validated against the input production before implementation.
+
+#include "pdhd_analysis_diagnostics_data.fcl"
+
+BEGIN_PROLOG
+
+pdhd_reco_association_data_template: {
+  module_type: "PDHDRecoAssociation"
+  Mode: "data"
+  ImplementationStatus: "template_only"
+  EnabledForMode: true
+  PFParticleTag: "pandora"
+  TrackTag: "pandoraTrack"
+  ShowerTag: "pandoraShower"
+  HitTag: "gaushit"
+}
+
+END_PROLOG

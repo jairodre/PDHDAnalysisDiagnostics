@@ -50,6 +50,8 @@ pdhd_beam_selection_stages: {
   RequireGoodDataTrigger: true
   # Keep false until the simulated trigger response is explicitly validated.
   RequireGoodMCTrigger: false
+  # Bound per-event messages; endJob always reports complete counters.
+  MaxEventMessages: 3
   BeamlineUtils: @local::standard_protodunebeamlineutils
   BeamCuts: @local::Prod2BeamCuts
 }

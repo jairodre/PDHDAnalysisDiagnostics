@@ -1,0 +1,19 @@
+# MC FHiCL template for PDHDEventProductInventory.
+#
+# Event product availability, cardinality, provenance, and quality status.
+# The analyzer remains a C++ scaffold and must not be scheduled yet. Product labels below document the intended interface and must
+# be validated against the input production before implementation.
+
+#include "pdhd_analysis_diagnostics_mc.fcl"
+
+BEGIN_PROLOG
+
+pdhd_event_product_inventory_mc_template: {
+  module_type: "PDHDEventProductInventory"
+  Mode: "mc"
+  ImplementationStatus: "template_only"
+  EnabledForMode: true
+  ExpectedProducts: []
+}
+
+END_PROLOG

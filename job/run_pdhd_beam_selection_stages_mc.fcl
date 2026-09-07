@@ -1,0 +1,31 @@
+# MC runtime configuration for PDHDBeamSelectionStages.
+#
+# This job applies the data-like reconstructed selection to simulated beam
+# instrumentation and Pandora objects. MC truth is intentionally absent from
+# the acceptance decision and can be joined later for performance validation.
+
+#include "messageservice.fcl"
+#include "pdhd_analysis_diagnostics_mc.fcl"
+
+process_name: PDHDBeamSelectionStagesMC
+
+services: {
+  TFileService: { fileName: "pdhd_beam_selection_stages_mc.root" }
+  message: @local::standard_info
+}
+
+source: {
+  module_type: RootInput
+  maxEvents: -1
+}
+
+outputs: {}
+
+physics: {
+  analyzers: {
+    beamSelectionStages: @local::pdhd_beam_selection_stages
+  }
+  analysis: [beamSelectionStages]
+  end_paths: [analysis]
+}
+

@@ -1,5 +1,9 @@
 # PDHD Analysis Diagnostics Catalog
 
+Each module has separate data and MC FHiCL under `job/`. All mode-specific files
+begin with `run_pdhd_`; scaffold configurations are unscheduled and marked
+`ImplementationStatus: "template_only"` until their analyzers are implemented.
+
 The catalog is both an implementation queue and an analysis contract. “Template”
 means the source contains design requirements but no registered art plugin.
 

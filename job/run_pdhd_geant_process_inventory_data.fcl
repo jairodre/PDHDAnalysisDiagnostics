@@ -1,0 +1,19 @@
+# DATA FHiCL template for PDHDGeantProcessInventory.
+#
+# Geant ancestry edges and interaction-process transitions.
+# Truth products do not exist in detector data; this table stays disabled. Product labels below document the intended interface and must
+# be validated against the input production before implementation.
+
+#include "pdhd_analysis_diagnostics_data.fcl"
+
+BEGIN_PROLOG
+
+pdhd_geant_process_inventory_data_template: {
+  module_type: "PDHDGeantProcessInventory"
+  Mode: "data"
+  ImplementationStatus: "template_only"
+  EnabledForMode: false
+  MCParticleTag: "largeant"
+}
+
+END_PROLOG

@@ -1,0 +1,19 @@
+# MC FHiCL template for PDHDTimingInventory.
+#
+# Trigger, flash, and reconstructed-T0 values with native units and provenance.
+# The analyzer remains a C++ scaffold and must not be scheduled yet. Product labels below document the intended interface and must
+# be validated against the input production before implementation.
+
+#include "pdhd_analysis_diagnostics_mc.fcl"
+
+BEGIN_PROLOG
+
+pdhd_timing_inventory_mc_template: {
+  module_type: "PDHDTimingInventory"
+  Mode: "mc"
+  ImplementationStatus: "template_only"
+  EnabledForMode: true
+  # Timing InputTags must be selected after inventorying the target production.
+}
+
+END_PROLOG

@@ -1,0 +1,19 @@
+# MC FHiCL template for PDHDMCTruthInventory.
+#
+# Generator MCTruth records and primary particles with origin and product provenance.
+# The analyzer remains a C++ scaffold and must not be scheduled yet. Product labels below document the intended interface and must
+# be validated against the input production before implementation.
+
+#include "pdhd_analysis_diagnostics_mc.fcl"
+
+BEGIN_PROLOG
+
+pdhd_mctruth_inventory_mc_template: {
+  module_type: "PDHDMCTruthInventory"
+  Mode: "mc"
+  ImplementationStatus: "template_only"
+  EnabledForMode: true
+  MCTruthTags: ["generator"]
+}
+
+END_PROLOG

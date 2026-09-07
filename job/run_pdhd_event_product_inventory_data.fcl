@@ -1,0 +1,19 @@
+# DATA FHiCL template for PDHDEventProductInventory.
+#
+# Event product availability, cardinality, provenance, and quality status.
+# The analyzer remains a C++ scaffold and must not be scheduled yet. Product labels below document the intended interface and must
+# be validated against the input production before implementation.
+
+#include "pdhd_analysis_diagnostics_data.fcl"
+
+BEGIN_PROLOG
+
+pdhd_event_product_inventory_data_template: {
+  module_type: "PDHDEventProductInventory"
+  Mode: "data"
+  ImplementationStatus: "template_only"
+  EnabledForMode: true
+  ExpectedProducts: []
+}
+
+END_PROLOG

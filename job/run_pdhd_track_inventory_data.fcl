@@ -1,0 +1,20 @@
+# DATA FHiCL template for PDHDTrackInventory.
+#
+# Geometry-only reconstructed-track inventory, orientation, and containment facts.
+# The analyzer remains a C++ scaffold and must not be scheduled yet. Product labels below document the intended interface and must
+# be validated against the input production before implementation.
+
+#include "pdhd_analysis_diagnostics_data.fcl"
+
+BEGIN_PROLOG
+
+pdhd_track_inventory_data_template: {
+  module_type: "PDHDTrackInventory"
+  Mode: "data"
+  ImplementationStatus: "template_only"
+  EnabledForMode: true
+  PFParticleTag: "pandora"
+  TrackTag: "pandoraTrack"
+}
+
+END_PROLOG

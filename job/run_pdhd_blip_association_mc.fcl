@@ -1,0 +1,22 @@
+# MC FHiCL template for PDHDBlipAssociation.
+#
+# Blip-to-reconstructed-object associations, with MC truth links enabled only in MC.
+# The analyzer remains a C++ scaffold and must not be scheduled yet. Product labels below document the intended interface and must
+# be validated against the input production before implementation.
+
+#include "pdhd_analysis_diagnostics_mc.fcl"
+
+BEGIN_PROLOG
+
+pdhd_blip_association_mc_template: {
+  module_type: "PDHDBlipAssociation"
+  Mode: "mc"
+  ImplementationStatus: "template_only"
+  EnabledForMode: true
+  BlipTag: "blipreco"
+  PFParticleTag: "pandora"
+  TrackTag: "pandoraTrack"
+  ShowerTag: "pandoraShower"
+}
+
+END_PROLOG

@@ -1,0 +1,19 @@
+# DATA FHiCL template for PDHDEnergyDepositInventory.
+#
+# MC energy-deposit records linked to Geant particles; unavailable on data.
+# Truth products do not exist in detector data; this table stays disabled. Product labels below document the intended interface and must
+# be validated against the input production before implementation.
+
+#include "pdhd_analysis_diagnostics_data.fcl"
+
+BEGIN_PROLOG
+
+pdhd_energy_deposit_inventory_data_template: {
+  module_type: "PDHDEnergyDepositInventory"
+  Mode: "data"
+  ImplementationStatus: "template_only"
+  EnabledForMode: false
+  # EnergyDepositTag must be fixed after checking the active production.
+}
+
+END_PROLOG

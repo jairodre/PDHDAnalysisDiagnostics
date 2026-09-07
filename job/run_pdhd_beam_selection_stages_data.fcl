@@ -1,0 +1,59 @@
+# Data runtime configuration for PDHDBeamSelectionStages.
+#
+# The analyzer applies the same reconstructed Pandora and beam-instrumentation
+# stages used for MC. For tested 2024 full-reconstructed data, the official
+# BeamEvent producer rebuilds `beamevent`; SkipLLT is recorded by that product
+# path and must not be interpreted as an LLT-complete trigger measurement.
+
+#include "BeamEvent.fcl"
+#include "services_dune.fcl"
+#include "pdhd_analysis_diagnostics_data.fcl"
+
+process_name: PDHDBeamSelectionStagesData
+
+services: {
+  TFileService: { fileName: "pdhd_beam_selection_stages_data.root" }
+  TimeTracker: @local::dune_time_tracker
+  MemoryTracker: @local::dune_memory_tracker
+  RandomNumberGenerator: {}
+  message: @local::dune_message_services_prod
+  FileCatalogMetadata: @local::art_file_catalog_data
+  ChannelStatusService: @local::dunefd_channel_status
+  WireReadout: @local::dune_wire_readout
+  GeometryConfigurationWriter: {}
+  # Run-28547 files carry protodunehdv6 geometry metadata.
+  Geometry: @local::protodunehdv6_geo
+  DetectorClocksService: @local::protodunehd_detectorclocks
+  DetectorPropertiesService: @local::protodunehd_detproperties
+  LArPropertiesService: @local::dunefd_properties
+  LArFFT: @local::dunefd_larfft
+  DatabaseUtil: @local::dunefd_database
+  IFDH: {}
+  IFBeam: {}
+}
+
+source: {
+  module_type: RootInput
+  maxEvents: -1
+}
+
+outputs: {}
+
+physics: {
+  producers: { beamevent: @local::pdhd_beamevent }
+  analyzers: {
+    beamSelectionStages: @local::pdhd_beam_selection_stages
+  }
+  produce: [beamevent]
+  analysis: [beamSelectionStages]
+  trigger_paths: [produce]
+  end_paths: [analysis]
+}
+
+physics.producers.beamevent.SaveOutTree: false
+physics.producers.beamevent.PrintDebug: false
+physics.producers.beamevent.DebugTOFs: false
+physics.producers.beamevent.ForceRead: false
+physics.producers.beamevent.MatchTime: true
+physics.producers.beamevent.SkipLLT: true
+

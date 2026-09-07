@@ -1,2 +1,2 @@
-# Install the shared configuration tables and focused runtime-test FHiCL files.
+# Install shared tables, runnable data/MC jobs, and unscheduled module templates.
 install_fhicl()

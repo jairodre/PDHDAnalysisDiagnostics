@@ -22,12 +22,14 @@
 #include "lardataobj/RecoBase/PFParticle.h"
 #include "lardataobj/RecoBase/Shower.h"
 #include "lardataobj/RecoBase/Track.h"
+#include "messagefacility/MessageLogger/MessageLogger.h"
 #include "protoduneana/PDHDAnalysisDiagnostics/Alg/BeamInstrumentationAlg.h"
 #include "protoduneana/PDHDAnalysisDiagnostics/Alg/BeamSelectionAlg.h"
 #include "protoduneana/Utilities/ProtoDUNEBeamlineUtils.h"
 #include "protoduneana/Utilities/ProtoDUNEPFParticleUtils.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <string>
 #include <vector>
@@ -80,11 +82,13 @@ public:
         acceptShowers_(p.get<bool>("AcceptShowers", true)),
         requireDataTrigger_(p.get<bool>("RequireGoodDataTrigger", true)),
         requireMcTrigger_(p.get<bool>("RequireGoodMCTrigger", false)),
+        maxEventMessages_(p.get<unsigned int>("MaxEventMessages", 3U)),
         beamline_(p.get<fhicl::ParameterSet>("BeamlineUtils")),
         cuts_(LoadOfficialDataCuts(p.get<fhicl::ParameterSet>("BeamCuts"),
                                    momentumLabel_)) {}
   void beginJob() override;
   void analyze(art::Event const &) override;
+  void endJob() override;
 
 private:
   struct Candidate {
@@ -98,8 +102,16 @@ private:
   art::InputTag dataBeamTag_, mcBeamTag_, pfpTag_, trackTag_, showerTag_;
   std::string momentumLabel_;
   bool acceptTracks_, acceptShowers_, requireDataTrigger_, requireMcTrigger_;
+  unsigned int maxEventMessages_;
   protoana::ProtoDUNEBeamlineUtils beamline_;
   BeamMatchCuts cuts_;
+
+  // Job counters expose product availability and selection outcomes.
+  std::uint64_t eventsProcessed_ = 0, dataEvents_ = 0, mcEvents_ = 0;
+  std::uint64_t beamProductAvailableEvents_ = 0, uniqueBeamEventEvents_ = 0;
+  std::uint64_t uniqueBeamTrackEvents_ = 0, pfpAvailableEvents_ = 0;
+  std::uint64_t selectedEvents_ = 0, ambiguousEvents_ = 0;
+  unsigned int eventMessagesEmitted_ = 0;
   TTree *eventTree_ = nullptr, *candidateTree_ = nullptr;
   unsigned int run_ = 0, subrun_ = 0, event_ = 0;
   bool isData_ = false;
@@ -113,6 +125,17 @@ private:
   std::string cutSource_ = "official_data", referenceSource_ = "unavailable";
 };
 void PDHDBeamSelectionStages::beginJob() {
+  mf::LogInfo("PDHDBeamSelectionStages")
+      << "Starting staged beam selection. DataBeamTag='"
+      << dataBeamTag_.encode() << "', MCBeamTag='" << mcBeamTag_.encode()
+      << "', PFParticleTag='" << pfpTag_.encode() << "', TrackTag='"
+      << trackTag_.encode() << "', ShowerTag='" << showerTag_.encode()
+      << "', NominalMomentum='" << momentumLabel_ << "', cut source='"
+      << cutSource_ << "', RequireGoodDataTrigger=" << requireDataTrigger_
+      << ", RequireGoodMCTrigger=" << requireMcTrigger_
+      << ", AcceptTracks=" << acceptTracks_
+      << ", AcceptShowers=" << acceptShowers_ << ".";
+
   auto fs = art::ServiceHandle<art::TFileService>();
   eventTree_ =
       fs->make<TTree>("BeamSelectionEvent", "Beam selection event summary");
@@ -177,10 +200,16 @@ void PDHDBeamSelectionStages::beginJob() {
 #undef C
 }
 void PDHDBeamSelectionStages::analyze(art::Event const &evt) {
+  ++eventsProcessed_;
   run_ = evt.run();
   subrun_ = evt.subRun();
   event_ = evt.event();
   isData_ = evt.isRealData();
+  if (isData_) {
+    ++dataEvents_;
+  } else {
+    ++mcEvents_;
+  }
   beamProductAvailable_ = beamEventUnique_ = beamTrackUnique_ = false;
   triggerEvaluated_ = goodTrigger_ = hasSelectedCandidate_ =
       selectionAmbiguous_ = false;
@@ -192,6 +221,8 @@ void PDHDBeamSelectionStages::analyze(art::Event const &evt) {
       isData_ ? dataBeamTag_ : mcBeamTag_);
   beamProductAvailable_ = bool(bh);
   beamEventUnique_ = bh && bh->size() == 1;
+  beamProductAvailableEvents_ += beamProductAvailable_;
+  uniqueBeamEventEvents_ += beamEventUnique_;
   if (beamEventUnique_) {
     bool const eval = isData_ ? requireDataTrigger_ : requireMcTrigger_;
     bi = BeamInstrumentationAlg::Extract(
@@ -202,6 +233,7 @@ void PDHDBeamSelectionStages::analyze(art::Event const &evt) {
     triggerEvaluated_ = bi.triggerEvaluated;
     goodTrigger_ = bi.goodTrigger;
     beamTrackUnique_ = bi.tracks.size() == 1;
+    uniqueBeamTrackEvents_ += beamTrackUnique_;
   }
   if (beamEventUnique_)
     referenceSource_ =
@@ -209,6 +241,17 @@ void PDHDBeamSelectionStages::analyze(art::Event const &evt) {
   auto ph = evt.getHandle<std::vector<recob::PFParticle>>(pfpTag_);
   auto th = evt.getHandle<std::vector<recob::Track>>(trackTag_);
   auto sh = evt.getHandle<std::vector<recob::Shower>>(showerTag_);
+  pfpAvailableEvents_ += bool(ph);
+  if ((!bh || !ph) && eventMessagesEmitted_ < maxEventMessages_) {
+    mf::LogWarning("PDHDBeamSelectionStages")
+        << "Required input missing for run " << run_ << ", subrun " << subrun_
+        << ", event " << event_ << ": beam product available=" << bool(bh)
+        << " from '" << (isData_ ? dataBeamTag_ : mcBeamTag_).encode()
+        << "', PFParticle product available=" << bool(ph) << " from '"
+        << pfpTag_.encode()
+        << "'. The event summary is retained with no selected candidate.";
+    ++eventMessagesEmitted_;
+  }
   std::vector<Candidate> candidates;
   protoana::ProtoDUNEPFParticleUtils pu;
   if (ph)
@@ -311,11 +354,39 @@ void PDHDBeamSelectionStages::analyze(art::Event const &evt) {
     selectedTrack_ = best->track;
     selectedShower_ = best->shower;
   }
+  selectedEvents_ += hasSelectedCandidate_;
+  ambiguousEvents_ += selectionAmbiguous_;
+
+  if (eventMessagesEmitted_ < maxEventMessages_) {
+    mf::LogInfo("PDHDBeamSelectionStages")
+        << "Selection result for run " << run_ << ", subrun " << subrun_
+        << ", event " << event_ << ": reference='" << referenceSource_
+        << "', beam event unique=" << beamEventUnique_
+        << ", beam track unique=" << beamTrackUnique_
+        << ", primary PFPs=" << nPrimary_
+        << ", Pandora beam primaries=" << nBeamPrimary_
+        << ", passing candidates=" << nPassing_
+        << ", selected PFP index=" << selectedPfp_
+        << ", ambiguous=" << selectionAmbiguous_ << ".";
+    ++eventMessagesEmitted_;
+  }
   for (auto const &c : candidates) {
     out_ = c;
     candidateTree_->Fill();
   }
   eventTree_->Fill();
+}
+
+void PDHDBeamSelectionStages::endJob() {
+  mf::LogInfo("PDHDBeamSelectionStages")
+      << "Beam-selection summary: processed=" << eventsProcessed_
+      << " (data=" << dataEvents_ << ", MC=" << mcEvents_
+      << "), beam product available=" << beamProductAvailableEvents_
+      << ", exactly one beam event=" << uniqueBeamEventEvents_
+      << ", exactly one beam track=" << uniqueBeamTrackEvents_
+      << ", PFParticle product available=" << pfpAvailableEvents_
+      << ", selected events=" << selectedEvents_
+      << ", ambiguous selected sets=" << ambiguousEvents_ << ".";
 }
 } // namespace pdhd::diagnostics
 DEFINE_ART_MODULE(pdhd::diagnostics::PDHDBeamSelectionStages)

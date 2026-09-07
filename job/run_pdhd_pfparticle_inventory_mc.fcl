@@ -1,0 +1,19 @@
+# MC FHiCL template for PDHDPFParticleInventory.
+#
+# Pandora PFParticle hierarchy, primary status, slice metadata, and object links.
+# The analyzer remains a C++ scaffold and must not be scheduled yet. Product labels below document the intended interface and must
+# be validated against the input production before implementation.
+
+#include "pdhd_analysis_diagnostics_mc.fcl"
+
+BEGIN_PROLOG
+
+pdhd_pfparticle_inventory_mc_template: {
+  module_type: "PDHDPFParticleInventory"
+  Mode: "mc"
+  ImplementationStatus: "template_only"
+  EnabledForMode: true
+  PFParticleTag: "pandora"
+}
+
+END_PROLOG

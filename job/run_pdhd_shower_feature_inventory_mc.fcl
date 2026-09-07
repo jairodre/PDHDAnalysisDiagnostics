@@ -1,0 +1,21 @@
+# MC FHiCL template for PDHDShowerFeatureInventory.
+#
+# Shower calorimetry and classifier features with explicit calibration sources.
+# The analyzer remains a C++ scaffold and must not be scheduled yet. Product labels below document the intended interface and must
+# be validated against the input production before implementation.
+
+#include "pdhd_analysis_diagnostics_mc.fcl"
+
+BEGIN_PROLOG
+
+pdhd_shower_feature_inventory_mc_template: {
+  module_type: "PDHDShowerFeatureInventory"
+  Mode: "mc"
+  ImplementationStatus: "template_only"
+  EnabledForMode: true
+  PFParticleTag: "pandora"
+  ShowerTag: "pandoraShower"
+  CNNTag: "emtrkmichelid:emtrkmichel"
+}
+
+END_PROLOG

@@ -1,0 +1,23 @@
+# DATA FHiCL template for PDHDTrackFeatureInventory.
+#
+# Track calorimetry, PID, momentum, and separate PFP/CNN classifier features.
+# The analyzer remains a C++ scaffold and must not be scheduled yet. Product labels below document the intended interface and must
+# be validated against the input production before implementation.
+
+#include "pdhd_analysis_diagnostics_data.fcl"
+
+BEGIN_PROLOG
+
+pdhd_track_feature_inventory_data_template: {
+  module_type: "PDHDTrackFeatureInventory"
+  Mode: "data"
+  ImplementationStatus: "template_only"
+  EnabledForMode: true
+  PFParticleTag: "pandora"
+  TrackTag: "pandoraTrack"
+  CalorimetryTag: "pandoracalo"
+  ParticleIDTag: "pandorapid"
+  CNNTag: "emtrkmichelid:emtrkmichel"
+}
+
+END_PROLOG
