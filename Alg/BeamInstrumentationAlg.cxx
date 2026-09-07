@@ -12,10 +12,12 @@ BeamInstrumentationRecord BeamInstrumentationAlg::Extract(
   r.valid = true;
   r.source = source;
   r.timingTrigger = e.GetTimingTrigger();
+  // Retained for diagnostics; the v10.17 PDHD producer sets this legacy field
+  // to -1 and uses timing-trigger plus beam-spill matching instead.
   r.beamTrigger = e.GetBITrigger();
   r.triggersMatched = e.CheckIsMatched();
   r.triggerEvaluated = evaluateTrigger;
-  // Preserve unevaluated=false separately from an evaluated failed trigger.
+  // Official PDHD decision: GetTimingTrigger()==12 && CheckIsMatched().
   if (evaluateTrigger) {
     r.goodTrigger = utils.IsGoodBeamlineTrigger(e);
   }

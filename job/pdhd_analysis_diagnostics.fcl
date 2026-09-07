@@ -16,6 +16,7 @@ pdhd_beam_instrumentation: {
   module_type: "PDHDBeamInstrumentation"
   DataBeamTag: "beamevent"
   MCBeamTag: "generator"
+  MCTruthTag: "generator"
   NominalMomentumGeV: 1.0
   EvaluateDataPID: false
   EvaluateMCTrigger: false

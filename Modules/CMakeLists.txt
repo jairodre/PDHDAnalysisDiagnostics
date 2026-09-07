@@ -4,6 +4,7 @@ set(BEAM_MODULE_LIBRARIES
   dune_PDHDAnalysisDiagnosticsAlg
   ProtoDUNEUtilities
   dunecore::DuneObj
+  nusimdata::SimulationBase
   lardataobj::RecoBase
   art::Framework_Core
   art::Framework_Principal

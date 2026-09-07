@@ -1,37 +1,81 @@
-# PDHD Analysis Diagnostics
+# ProtoDUNE-HD Analysis Diagnostics
 
-This package is a scaffold for small, composable ProtoDUNE-HD diagnostic
-analyzers. It separates event products, truth particles, reconstructed objects,
-association edges, derived features, and selection decisions so each stage can
-be tested without depending on a single monolithic ntuple module.
+Modular LArSoft analyzers for inspecting ProtoDUNE-HD beam instrumentation,
+reconstructed objects, simulation truth, associations, and staged selections.
+The package is designed to keep raw observables, derived quantities, and physics
+decisions independently auditable in data and Monte Carlo.
 
-## Current status
+## Available diagnostics
 
-The directory structure, implementation contracts, documentation catalog, and
-base FHiCL tables exist. The reusable algorithms are implemented and registered
-as `dune_PDHDAnalysisDiagnosticsAlg`. A preceding beam-instrumentation revision
-compiled and ran on data; that test established that the selected reconstructed
-files do not store `beamevent`. Separate data and MC jobs now handle this product
-difference explicitly, but the revised sources still require a user build and
-runtime validation. The two beam analyzer plugins are registered; all other
-module templates intentionally perform no event processing. Add modules one at a
-time only after their product labels, schemas, units, validity behavior, and
-data/MC contract have been reviewed.
+- `PDHDBeamInstrumentation` records beam-event provenance, trigger information,
+  beamline tracks, spectrometer momentum, TOF, Cherenkov values, and PID
+  candidates.
+- `PDHDBeamSelectionStages` records individual reconstructed beam-selection
+  decisions without using MC truth to accept events.
+- Additional inventory, association, calorimetry, blip, cosmic, and truth
+  modules are present as documented templates for incremental implementation.
 
-## Design rules
+See [DIAGNOSTICS_CATALOG.md](DIAGNOSTICS_CATALOG.md) for every module's inputs,
+outputs, assumptions, limitations, and validation state. Historical scaffold
+details are preserved in
+[IMPLEMENTATION_STATUS_AND_DESIGN.md](IMPLEMENTATION_STATUS_AND_DESIGN.md).
 
-- Every table uses run, subrun, and event keys plus stable collection indices.
-- Missing products are represented by availability/status fields, not physical
-  zeros or silently substituted producers.
-- Reconstructed observables define nominal data-like selections. MC truth is
-  used to label and measure their performance, not to accept an event.
-- Raw and derived quantities remain separate, including original/reoriented
-  tracks, raw/T0-corrected coordinates, SCE/no-SCE calorimetry, and weighted/
-  unweighted classifier scores.
-- Object inventories preserve facts; association modules preserve graph edges;
-  selection modules preserve all component decisions and final decisions.
-- Official DUNE and LArSoft utilities are preferred after checking compatibility
-  with the locally active release and PDHD production products.
+## Repository layout
 
-See `DIAGNOSTICS_CATALOG.md` for the responsibility and implementation contract
-of every planned analyzer.
+```text
+PDHDAnalysisDiagnostics/
+├── Alg/             Reusable extraction and selection algorithms
+├── DataProducts/    Shared diagnostic data products
+├── Modules/         art analyzer plugins
+├── job/             Shared and mode-specific FHiCL configurations
+├── CMakeLists.txt
+└── DIAGNOSTICS_CATALOG.md
+```
+
+## Running the beam-instrumentation diagnostic
+
+Build the containing `protoduneana` checkout in its configured LArSoft
+environment before running either job. Data and MC use separate entry points
+because their beam products and services differ.
+
+Data:
+
+```bash
+lar -c run_pdhd_beam_instrumentation_data.fcl \
+  -n 1 \
+  -s INPUT_DATA.root \
+  -T pdhd_beam_instrumentation_data.root
+```
+
+Monte Carlo:
+
+```bash
+lar -c run_pdhd_beam_instrumentation_mc.fcl \
+  -n 1 \
+  -s INPUT_MC.root \
+  -T pdhd_beam_instrumentation_mc.root
+```
+
+Omit `-n 1` to use the FHiCL default and process all input events. The data job
+can rebuild `beamevent` from retained timing information and IFBeam. Its current
+`SkipLLT` path stores the exact Cherenkov values consumed by the official PID
+utility while separately recording whether their detector provenance is valid.
+
+## Output contract
+
+Diagnostic trees retain event identifiers, selected product tags, availability,
+cardinality, method names, and validity fields. Missing information is kept
+distinct from physical zero. Data-like reconstruction defines nominal
+selections; MC truth is reserved for labeling and performance measurements.
+
+## Validation status
+
+Beam-instrumentation behavior has been exercised on a limited PDHD data sample,
+but the most recent source and schema changes require a new user build and
+runtime validation. Template modules must not be treated as implemented or
+validated. Consult the catalog before using a branch in a physics result.
+
+## References
+
+- [DUNE software repositories](https://github.com/orgs/DUNE/repositories)
+- [LArSoft code documentation](https://code-doc.larsoft.org/docs/latest/html/)

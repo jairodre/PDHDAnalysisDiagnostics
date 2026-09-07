@@ -20,6 +20,7 @@
 #include "dunecore/DuneObj/ProtoDUNEBeamEvent.h"
 #include "fhiclcpp/ParameterSet.h"
 #include "messagefacility/MessageLogger/MessageLogger.h"
+#include "nusimdata/SimulationBase/MCTruth.h"
 #include "protoduneana/PDHDAnalysisDiagnostics/Alg/BeamInstrumentationAlg.h"
 #include "protoduneana/Utilities/ProtoDUNEBeamlineUtils.h"
 #include <cmath>
@@ -43,6 +44,8 @@ public:
       : EDAnalyzer(p), dataTag_(p.get<art::InputTag>(
                            "DataBeamTag", art::InputTag{"beamevent"})),
         mcTag_(p.get<art::InputTag>("MCBeamTag", art::InputTag{"generator"})),
+        mcTruthTag_(
+            p.get<art::InputTag>("MCTruthTag", art::InputTag{"generator"})),
         nominalMomentum_(p.get<double>("NominalMomentumGeV", 1.)),
         evaluateDataPid_(p.get<bool>("EvaluateDataPID", false)),
         evaluateMcTrigger_(p.get<bool>("EvaluateMCTrigger", false)),
@@ -67,6 +70,7 @@ public:
         beamline_(p.get<fhicl::ParameterSet>("BeamlineUtils")) {
     consumes<std::vector<beam::ProtoDUNEBeamEvent>>(dataTag_);
     consumes<std::vector<beam::ProtoDUNEBeamEvent>>(mcTag_);
+    consumes<std::vector<simb::MCTruth>>(mcTruthTag_);
   }
   void beginJob() override;
   void analyze(art::Event const &) override;
@@ -74,7 +78,7 @@ public:
 
 private:
   // Configuration records both the selected product and how it was produced.
-  art::InputTag dataTag_, mcTag_;
+  art::InputTag dataTag_, mcTag_, mcTruthTag_;
   double nominalMomentum_;
   bool evaluateDataPid_, evaluateMcTrigger_, evaluateMcPid_;
   std::string beamEventSourceDescription_, beamEventBuildMethod_;
@@ -105,10 +109,13 @@ private:
   unsigned int run_ = 0, subrun_ = 0, event_ = 0;
   bool isData_ = false, available_ = false, unique_ = false;
   bool pidEvaluated_ = false;
+  bool mcBeamPdgValid_ = false;
   bool cherenkovStatusValueAvailable_ = false;
   bool cherenkovPressureValueAvailable_ = false;
   unsigned int beamEventCount_ = 0;
-  std::string source_, selectedProductTag_, pidMethod_;
+  unsigned int mcTruthRecordCount_ = 0, mcBeamPrimaryCount_ = 0;
+  int mcBeamPdg_ = -999;
+  std::string source_, selectedProductTag_, pidMethod_, mcBeamPdgSource_;
   bool goodTrigger_ = false, triggerEvaluated_ = false;
   bool hasPerfectBeamMomentum_ = false, triggersMatched_ = false;
   int timingTrigger_ = -1, beamTrigger_ = -1;
@@ -122,11 +129,13 @@ private:
   std::vector<int> tofChannels_, pidCandidates_, activeFiberCounts_;
   std::vector<std::string> monitorNames_;
   void reset();
+  void fillMCBeamPdg(art::Event const &);
 };
 void PDHDBeamInstrumentation::beginJob() {
   mf::LogInfo("PDHDBeamInstrumentation")
       << "Starting beam-instrumentation diagnostics. DataBeamTag='"
       << dataTag_.encode() << "', MCBeamTag='" << mcTag_.encode()
+      << "', MCTruthTag='" << mcTruthTag_.encode()
       << "', NominalMomentumGeV=" << nominalMomentum_
       << ", EvaluateDataPID=" << evaluateDataPid_
       << ", EvaluateMCTrigger=" << evaluateMcTrigger_
@@ -164,8 +173,16 @@ void PDHDBeamInstrumentation::beginJob() {
   addBranch(*tree_, "non_nominal_input_handling_used",
             nonNominalInputHandlingUsed_);
 
+  // MC truth identity is independent of simulated beam-instrumentation fields.
+  // Data keeps the sentinel and mc_beam_pdg_valid=false.
+  addBranch(*tree_, "mc_beam_pdg", mcBeamPdg_);
+  addBranch(*tree_, "mc_beam_pdg_valid", mcBeamPdgValid_);
+  addBranch(*tree_, "mc_beam_pdg_source", mcBeamPdgSource_);
+  addBranch(*tree_, "mc_truth_record_count", mcTruthRecordCount_);
+  addBranch(*tree_, "mc_beam_primary_count", mcBeamPrimaryCount_);
+
   // Selection decisions carry explicit evaluation and method information.
-  addBranch(*tree_, "good_trigger", goodTrigger_);
+  addBranch(*tree_, "IsGoodBeamlineTrigger", goodTrigger_);
   addBranch(*tree_, "trigger_evaluated", triggerEvaluated_);
   addBranch(*tree_, "pid_evaluated", pidEvaluated_);
   addBranch(*tree_, "pid_method", pidMethod_);
@@ -182,9 +199,9 @@ void PDHDBeamInstrumentation::beginJob() {
 
   // These are uncut beam-event observables; units are encoded in their names.
   addBranch(*tree_, "HasPerfectBeamMomentum", hasPerfectBeamMomentum_);
-  addBranch(*tree_, "timing_trigger", timingTrigger_);
-  addBranch(*tree_, "beam_trigger", beamTrigger_);
-  addBranch(*tree_, "triggers_matched", triggersMatched_);
+  addBranch(*tree_, "GetTimingTrigger", timingTrigger_);
+  addBranch(*tree_, "GetBITrigger", beamTrigger_);
+  addBranch(*tree_, "CheckIsMatched", triggersMatched_);
   addBranch(*tree_, "momenta_GeV", momenta_);
   addBranch(*tree_, "tof_ns", tof_);
   addBranch(*tree_, "tof_channels", tofChannels_);
@@ -214,7 +231,12 @@ void PDHDBeamInstrumentation::reset() {
       hasPerfectBeamMomentum_ = triggersMatched_ = false;
   cherenkovStatusValueAvailable_ = false;
   cherenkovPressureValueAvailable_ = false;
+  mcBeamPdgValid_ = false;
   beamEventCount_ = 0;
+  mcTruthRecordCount_ = 0;
+  mcBeamPrimaryCount_ = 0;
+  mcBeamPdg_ = -999;
+  mcBeamPdgSource_ = "not_evaluated_data";
   source_ = "unavailable";
   selectedProductTag_ = "unavailable";
   pidMethod_ = "not_evaluated";
@@ -240,6 +262,40 @@ void PDHDBeamInstrumentation::reset() {
   trackEndDirY_.clear();
   trackEndDirZ_.clear();
 }
+
+void PDHDBeamInstrumentation::fillMCBeamPdg(art::Event const &evt) {
+  auto const truthHandle =
+      evt.getHandle<std::vector<simb::MCTruth>>(mcTruthTag_);
+  if (!truthHandle) {
+    mcBeamPdgSource_ = "missing_" + mcTruthTag_.encode();
+    return;
+  }
+
+  mcTruthRecordCount_ = truthHandle->size();
+  mcBeamPdgSource_ = mcTruthTag_.encode() + ":noncosmic_primary";
+
+  // This mirrors the generator-primary step used by ProtoDUNETruthUtils.
+  // Cosmic-overlay records are excluded before identifying the beam primary.
+  for (auto const &truth : *truthHandle) {
+    if (truth.Origin() == simb::kCosmicRay) {
+      continue;
+    }
+    for (int index = 0; index < truth.NParticles(); ++index) {
+      auto const &particle = truth.GetParticle(index);
+      if (particle.Process() != "primary") {
+        continue;
+      }
+      ++mcBeamPrimaryCount_;
+      // Preserve the established first generator-primary convention while
+      // exposing the total count so ambiguous events remain identifiable.
+      if (!mcBeamPdgValid_) {
+        mcBeamPdg_ = particle.PdgCode();
+        mcBeamPdgValid_ = true;
+      }
+    }
+  }
+}
+
 void PDHDBeamInstrumentation::analyze(art::Event const &evt) {
   reset();
   ++eventsProcessed_;
@@ -251,6 +307,7 @@ void PDHDBeamInstrumentation::analyze(art::Event const &evt) {
     ++dataEvents_;
   } else {
     ++mcEvents_;
+    fillMCBeamPdg(evt);
   }
 
   // Data and MC consume distinct products but share the output schema.

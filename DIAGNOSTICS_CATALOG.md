@@ -110,6 +110,16 @@ zero-valued Cherenkov fields that `GetPID` still consumes.
 `HasPerfectBeamMomentum` stores the result returned by the official
 `ProtoDUNEBeamlineUtils::HasPerfectBeamMomentum` method; it is not the nominal
 beam-momentum setting.
+Trigger branches follow their official method names. For PDHD,
+`IsGoodBeamlineTrigger` is the supported decision and combines
+`GetTimingTrigger()==12` with `CheckIsMatched`. `GetBITrigger` is retained only
+as a legacy diagnostic because the v10.17 PDHD producer explicitly sets it to
+-1.
+For MC, `mc_beam_pdg` stores the first generator primary from a non-cosmic
+`MCTruth` record under `MCTruthTag`. The validity, product source, truth-record
+count, and qualifying-primary count are separate branches, so missing or
+ambiguous truth remains visible. Data stores the -999 sentinel with
+`mc_beam_pdg_valid=false`.
 
 ### PDHDTimingInventory
 

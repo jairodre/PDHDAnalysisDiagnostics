@@ -27,6 +27,8 @@ struct BeamInstrumentationRecord {
   // Trigger/PID booleans are meaningful only when their evaluated flag is set.
   bool valid = false, goodTrigger = false, triggerEvaluated = false,
        hasPerfectBeamMomentum = false;
+  // PDHD BeamEvent sets the legacy BI trigger to -1; use the timing/match
+  // fields through IsGoodBeamlineTrigger for the supported trigger decision.
   int timingTrigger = -1, beamTrigger = -1;
   bool triggersMatched = false;
   std::vector<double> momentaGeV, tofNs;
