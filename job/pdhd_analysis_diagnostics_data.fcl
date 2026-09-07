@@ -1,0 +1,11 @@
+# Data-mode scaffold. This table only records intended mode; it does not
+# schedule a module. Truth analyzers must remain disabled for real data.
+
+#include "pdhd_analysis_diagnostics.fcl"
+
+BEGIN_PROLOG
+
+pdhd_analysis_diagnostics_data: @local::pdhd_analysis_diagnostics
+pdhd_analysis_diagnostics_data.mode: "data"
+
+END_PROLOG

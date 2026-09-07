@@ -1,0 +1,11 @@
+# MC-mode scaffold. This table only records intended mode; it does not schedule
+# a module. Truth and backtracking products must still be checked per event.
+
+#include "pdhd_analysis_diagnostics.fcl"
+
+BEGIN_PROLOG
+
+pdhd_analysis_diagnostics_mc: @local::pdhd_analysis_diagnostics
+pdhd_analysis_diagnostics_mc.mode: "mc"
+
+END_PROLOG

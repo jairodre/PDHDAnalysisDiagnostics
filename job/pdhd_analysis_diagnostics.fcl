@@ -1,0 +1,56 @@
+# Base configuration for PDHDAnalysisDiagnostics. Beam analyzers are populated;
+# remaining package modules are still templates and are not scheduled here.
+
+#include "ProtoDUNEBeamlineUtils.fcl"
+#include "ProtoDUNEBeamCuts.fcl"
+
+BEGIN_PROLOG
+
+pdhd_analysis_diagnostics: {
+  mode: "auto"
+  schema_version: 0
+  require_configured_products: false
+}
+
+pdhd_beam_instrumentation: {
+  module_type: "PDHDBeamInstrumentation"
+  DataBeamTag: "beamevent"
+  MCBeamTag: "generator"
+  NominalMomentumGeV: 1.0
+  EvaluateDataPID: false
+  EvaluateMCTrigger: false
+  EvaluateMCPID: false
+  # Conservative shared defaults. Runnable data/MC files override these with
+  # the exact product construction and LLT-status provenance for that mode.
+  BeamEventSourceDescription: "configured_beam_event_product"
+  BeamEventBuildMethod: "consume_configured_product"
+  BeamEventProducedInCurrentJob: false
+  CherenkovStatusSource: "not_validated"
+  CherenkovStatusProvenanceValid: false
+  CherenkovPressureSource: "not_validated"
+  CherenkovPressureProvenanceValid: false
+  NonNominalInputHandlingUsed: false
+  # Bound per-event diagnostics; the complete counts are printed at endJob.
+  MaxEventMessages: 3
+  FiberMonitorNames: ["XBPF022697", "XBPF022701", "XBPF022702"]
+  BeamlineUtils: @local::standard_protodunebeamlineutils
+}
+
+pdhd_beam_selection_stages: {
+  module_type: "PDHDBeamSelectionStages"
+  DataBeamTag: "beamevent"
+  MCBeamTag: "generator"
+  PFParticleTag: "pandora"
+  TrackTag: "pandoraTrack"
+  ShowerTag: "pandoraShower"
+  NominalMomentum: "1"
+  AcceptTracks: true
+  AcceptShowers: true
+  RequireGoodDataTrigger: true
+  # Keep false until the simulated trigger response is explicitly validated.
+  RequireGoodMCTrigger: false
+  BeamlineUtils: @local::standard_protodunebeamlineutils
+  BeamCuts: @local::Prod2BeamCuts
+}
+
+END_PROLOG

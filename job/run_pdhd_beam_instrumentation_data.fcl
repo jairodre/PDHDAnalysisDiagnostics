@@ -1,0 +1,76 @@
+# Data runtime configuration for PDHDBeamInstrumentation.
+#
+# The 2024 full-reconstructed PDHD data tested for this package do not retain a
+# ProtoDUNEBeamEvent product. This job therefore runs the official PDHD beam
+# event producer using IFBeam before the analyzer consumes "beamevent". These
+# files also lack the decoded LLT frames, so the supported SkipLLT mode is used;
+# Cherenkov status and PID are explicitly marked unavailable rather than
+# interpreted as physical zeroes. The job does not rerun TPC reconstruction.
+
+#include "BeamEvent.fcl"
+#include "services_dune.fcl"
+#include "pdhd_analysis_diagnostics_data.fcl"
+
+process_name: PDHDBeamInstrumentationData
+
+services: {
+  TFileService: {
+    fileName: "pdhd_beam_instrumentation_data.root"
+  }
+  TimeTracker: @local::dune_time_tracker
+  MemoryTracker: @local::dune_memory_tracker
+  RandomNumberGenerator: {}
+  message: @local::dune_message_services_prod
+  FileCatalogMetadata: @local::art_file_catalog_data
+  ChannelStatusService: @local::dunefd_channel_status
+  WireReadout: @local::dune_wire_readout
+  GeometryConfigurationWriter: {}
+  # Run-28547 full-reconstructed files carry protodunehdv6 geometry metadata.
+  # GeometryConfigurationWriter requires the job geometry to match that input.
+  Geometry: @local::protodunehdv6_geo
+  DetectorClocksService: @local::protodunehd_detectorclocks
+  DetectorPropertiesService: @local::protodunehd_detproperties
+  LArPropertiesService: @local::dunefd_properties
+  LArFFT: @local::dunefd_larfft
+  DatabaseUtil: @local::dunefd_database
+  IFDH: {}
+  IFBeam: {}
+}
+
+source: {
+  module_type: RootInput
+  maxEvents: -1
+}
+
+outputs: {}
+
+physics: {
+  producers: {
+    beamevent: @local::pdhd_beamevent
+  }
+  analyzers: {
+    beamInstrumentation: @local::pdhd_beam_instrumentation
+  }
+
+  produce: [ beamevent ]
+  analysis: [ beamInstrumentation ]
+  trigger_paths: [ produce ]
+  end_paths: [ analysis ]
+}
+
+physics.producers.beamevent.SaveOutTree: false
+physics.producers.beamevent.PrintDebug: false
+physics.producers.beamevent.DebugTOFs: false
+physics.producers.beamevent.ForceRead: false
+physics.producers.beamevent.MatchTime: true
+physics.producers.beamevent.SkipLLT: true
+
+physics.analyzers.beamInstrumentation.EvaluateDataPID: true
+physics.analyzers.beamInstrumentation.BeamEventSourceDescription: "official_PDHD_BeamEvent_rebuilt_from_IFBeam_and_retained_timing_products"
+physics.analyzers.beamInstrumentation.BeamEventBuildMethod: "pdhd_beamevent_with_SkipLLT"
+physics.analyzers.beamInstrumentation.BeamEventProducedInCurrentJob: true
+physics.analyzers.beamInstrumentation.CherenkovStatusSource: "ProtoDUNEBeamEvent_values_with_SkipLLT"
+physics.analyzers.beamInstrumentation.CherenkovStatusProvenanceValid: false
+physics.analyzers.beamInstrumentation.CherenkovPressureSource: "ProtoDUNEBeamEvent_values_with_SkipLLT"
+physics.analyzers.beamInstrumentation.CherenkovPressureProvenanceValid: false
+physics.analyzers.beamInstrumentation.NonNominalInputHandlingUsed: true

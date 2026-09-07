@@ -1,0 +1,43 @@
+# MC runtime configuration for PDHDBeamInstrumentation.
+#
+# Simulated beam events are read from the existing "generator" product. The
+# configuration deliberately does not run the data-only IFBeam producer and
+# leaves simulated trigger and PID evaluation disabled until those responses
+# have been validated for the production being analyzed.
+
+#include "messageservice.fcl"
+#include "pdhd_analysis_diagnostics_mc.fcl"
+
+process_name: PDHDBeamInstrumentationMC
+
+services: {
+  TFileService: {
+    fileName: "pdhd_beam_instrumentation_mc.root"
+  }
+  message: @local::standard_info
+}
+
+source: {
+  module_type: RootInput
+  maxEvents: -1
+}
+
+outputs: {}
+
+physics: {
+  analyzers: {
+    beamInstrumentation: @local::pdhd_beam_instrumentation
+  }
+
+  analysis: [ beamInstrumentation ]
+  end_paths: [ analysis ]
+}
+
+physics.analyzers.beamInstrumentation.BeamEventSourceDescription: "stored_simulated_ProtoDUNEBeamEvent"
+physics.analyzers.beamInstrumentation.BeamEventBuildMethod: "consume_generator_product"
+physics.analyzers.beamInstrumentation.BeamEventProducedInCurrentJob: false
+physics.analyzers.beamInstrumentation.CherenkovStatusSource: "unvalidated_simulated_status"
+physics.analyzers.beamInstrumentation.CherenkovStatusProvenanceValid: false
+physics.analyzers.beamInstrumentation.CherenkovPressureSource: "unvalidated_simulated_pressure"
+physics.analyzers.beamInstrumentation.CherenkovPressureProvenanceValid: false
+physics.analyzers.beamInstrumentation.NonNominalInputHandlingUsed: false
