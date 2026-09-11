@@ -2,7 +2,6 @@
 # remaining package modules are still templates and are not scheduled here.
 
 #include "ProtoDUNEBeamlineUtils.fcl"
-#include "ProtoDUNEBeamCuts.fcl"
 
 BEGIN_PROLOG
 
@@ -30,10 +29,24 @@ pdhd_beam_instrumentation: {
   CherenkovStatusProvenanceValid: false
   CherenkovPressureSource: "not_validated"
   CherenkovPressureProvenanceValid: false
+  # Separate IFBeam-derived view. It becomes valid only after the precise 2024
+  # PDHD channel mapping and BeamEvent timestamp convention are checked.
+  IFBeamCherenkovSource: "not_validated"
+  IFBeamCherenkovProvenanceValid: false
+  IFBeamTimestampUnit: "unknown"
+  IFBeamCKov0ChannelName: "not_configured"
+  IFBeamCKov1ChannelName: "not_configured"
   NonNominalInputHandlingUsed: false
+  # Also print endJob counters to stdout when LogInfo categories are filtered.
+  PrintSummaryToStdout: true
   # Bound per-event diagnostics; the complete counts are printed at endJob.
   MaxEventMessages: 3
-  FiberMonitorNames: ["XBPF022697", "XBPF022701", "XBPF022702"]
+  # Print a BeamlineReco-style report for the first three eligible events.
+  # Set MaxEventDetailPrintouts to 0 only for intentionally small test jobs.
+  PrintEventDetailsToStdout: true
+  MaxEventDetailPrintouts: 3
+  # Keep every H4-VLE PDHD profile monitor in the diagnostic output.
+  FiberMonitorNames: ["XBPF022697", "XBPF022698", "XBPF022701", "XBPF022702", "XBPF022707", "XBPF022708", "XBPF022716", "XBPF022717"]
   BeamlineUtils: @local::standard_protodunebeamlineutils
 }
 
@@ -42,18 +55,29 @@ pdhd_beam_selection_stages: {
   DataBeamTag: "beamevent"
   MCBeamTag: "generator"
   PFParticleTag: "pandora"
+  # Separate tags make the Pandora beam-slice source auditable.
+  PFParticleMetadataTag: "pandora"
+  PFParticleSliceTag: "pandora"
   TrackTag: "pandoraTrack"
   ShowerTag: "pandoraShower"
-  NominalMomentum: "1"
-  AcceptTracks: true
-  AcceptShowers: true
+  # Passed to BeamInstrumentationAlg only. PID evaluation is disabled here,
+  # so it does not define a candidate cut or any beam--TPC threshold.
+  BeamInstrumentationNominalMomentumGeV: 5.0
+  # A candidate has exactly one reconstructed representation: track or shower.
+  # A PFP with both types, multiple objects, or neither is kept as diagnostic
+  # output but cannot pass. Neither type is silently preferred.
   RequireGoodDataTrigger: true
-  # Keep false until the simulated trigger response is explicitly validated.
-  RequireGoodMCTrigger: false
+  RequireGoodMCTrigger: true
+  # The nominal conjunction stops at event quality, one beamline track,
+  # Pandora beam-slice primary, and one unambiguous reconstructed object. The
+  # endpoint/entry residuals below are stored for a later HD-specific cut.
+  # Tracks use a local lower-Z-entry chord; showers use ShowerStart/Direction.
+  TPCEntryDirectionLengthCm: 5.0
+  # Also print endJob counters to stdout when LogInfo categories are filtered.
+  PrintSummaryToStdout: true
   # Bound per-event messages; endJob always reports complete counters.
   MaxEventMessages: 3
   BeamlineUtils: @local::standard_protodunebeamlineutils
-  BeamCuts: @local::Prod2BeamCuts
 }
 
 END_PROLOG

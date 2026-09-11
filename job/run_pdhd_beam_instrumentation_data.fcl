@@ -28,6 +28,7 @@ services: {
   # Run-28547 full-reconstructed files carry protodunehdv6 geometry metadata.
   # GeometryConfigurationWriter requires the job geometry to match that input.
   Geometry: @local::protodunehdv6_geo
+  # Geometry: @local::protodunev7_geo
   DetectorClocksService: @local::protodunehd_detectorclocks
   DetectorPropertiesService: @local::protodunehd_detproperties
   LArPropertiesService: @local::dunefd_properties
@@ -59,11 +60,15 @@ physics: {
 }
 
 physics.producers.beamevent.SaveOutTree: false
+# Temporary upstream diagnostics: expose IFBeam pressure fetches and XCET
+# trigger-time matching while retaining the nominal beam-event construction.
 physics.producers.beamevent.PrintDebug: false
+physics.producers.beamevent.XCETDebug: false
 physics.producers.beamevent.DebugTOFs: false
 physics.producers.beamevent.ForceRead: false
 physics.producers.beamevent.MatchTime: true
 physics.producers.beamevent.SkipLLT: true
+physics.analyzers.beamInstrumentation.MaxEventDetailPrintouts: 0
 
 physics.analyzers.beamInstrumentation.EvaluateDataPID: true
 physics.analyzers.beamInstrumentation.BeamEventSourceDescription: "official_PDHD_BeamEvent_rebuilt_from_IFBeam_and_retained_timing_products"
@@ -73,4 +78,12 @@ physics.analyzers.beamInstrumentation.CherenkovStatusSource: "ProtoDUNEBeamEvent
 physics.analyzers.beamInstrumentation.CherenkovStatusProvenanceValid: false
 physics.analyzers.beamInstrumentation.CherenkovPressureSource: "ProtoDUNEBeamEvent_values_with_SkipLLT"
 physics.analyzers.beamInstrumentation.CherenkovPressureProvenanceValid: false
+# The producer accesses IFBeam, but the run-28694 CKov channel mapping and
+# timestamp unit have not yet been validated. Keep the IFBeam view explicit
+# and invalid rather than relabeling the current zero-valued BeamEvent fields.
+physics.analyzers.beamInstrumentation.IFBeamCherenkovSource: "pdhd_beamevent:IFBeam_unvalidated_channel_mapping"
+physics.analyzers.beamInstrumentation.IFBeamCherenkovProvenanceValid: false
+physics.analyzers.beamInstrumentation.IFBeamTimestampUnit: "unknown"
+physics.analyzers.beamInstrumentation.IFBeamCKov0ChannelName: "not_configured"
+physics.analyzers.beamInstrumentation.IFBeamCKov1ChannelName: "not_configured"
 physics.analyzers.beamInstrumentation.NonNominalInputHandlingUsed: true

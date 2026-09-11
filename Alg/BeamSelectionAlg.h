@@ -2,13 +2,14 @@
  * @file BeamSelectionAlg.h
  * @brief Evaluates explicit, data-like beam matching and selection components.
  *
- * Official data-cut values are supplied by FHiCL. Both data and MC pass a
- * reconstructed beamline reference; truth origin never enters this calculation.
+ * Both data and MC pass a reconstructed beamline reference; truth origin never
+ * enters this calculation. Beamline-to-TPC residuals are recorded as
+ * observables; this algorithm deliberately contains no numerical cut table.
  */
 #ifndef PROTODUNEANA_PDHDANALYSISDIAGNOSTICS_BEAMSELECTIONALG_H
 #define PROTODUNEANA_PDHDANALYSISDIAGNOSTICS_BEAMSELECTIONALG_H
 #include "protoduneana/PDHDAnalysisDiagnostics/Alg/GeometryContainmentAlg.h"
-#include <string>
+#include <limits>
 namespace pdhd::diagnostics {
 struct Direction3D {
   double x = 0., y = 0., z = 0.;
@@ -18,15 +19,6 @@ enum class BeamReferenceSource {
   DataInstrumentation,
   SimulatedInstrumentation,
   TruthProjection
-};
-struct ClosedRange {
-  double minimum = 0., maximum = 0.;
-  bool Contains(double) const noexcept;
-};
-struct BeamMatchCuts {
-  ClosedRange deltaXcm, deltaYcm, entranceZcm;
-  double minimumDirectionCosine = 0.;
-  std::string source = "official_data";
 };
 struct BeamMatchInput {
   bool beamReferenceValid = false;
@@ -39,27 +31,29 @@ struct BeamMatchInput {
 };
 struct BeamMatchResult {
   bool valid = false;
-  double deltaXcm = 0., deltaYcm = 0., entranceZcm = 0., directionCosine = 0.;
-  double matchScore = 0.;
-  bool passesDeltaX = false, passesDeltaY = false, passesEntranceZ = false;
-  bool passesDirection = false, passesAll = false;
-  std::string cutSource;
+  // NaN is an unavailable observable, never a physically meaningful zero.
+  double deltaXcm = std::numeric_limits<double>::quiet_NaN();
+  double deltaYcm = std::numeric_limits<double>::quiet_NaN();
+  double entranceZcm = std::numeric_limits<double>::quiet_NaN();
+  double directionCosine = std::numeric_limits<double>::quiet_NaN();
   BeamReferenceSource referenceSource = BeamReferenceSource::Unavailable;
 };
 struct BeamSelectionInput {
   bool goodBeamTrigger = false, exactlyOneBeamlineTrack = false;
-  bool pandoraBeamPrimary = false, acceptedRecoObjectType = false;
-  BeamMatchResult match;
+  // The nominal TPC seed is a primary PFP in Pandora's beam-tagged slice.
+  bool pandoraBeamSlicePrimary = false, hasUnambiguousRecoObject = false;
 };
 struct BeamSelectionResult {
   bool passesGoodBeamTrigger = false, passesBeamlineMultiplicity = false;
-  bool passesPandoraBeamPrimary = false, passesRecoObjectType = false;
-  bool passesInstrumentationMatch = false, selected = false;
+  bool passesPandoraBeamSlicePrimary = false;
+  bool passesUnambiguousRecoObject = false;
+  bool selected = false;
 };
 class BeamSelectionAlg {
 public:
-  static BeamMatchResult Match(BeamMatchInput const &, BeamMatchCuts const &);
-  static BeamSelectionResult Select(BeamSelectionInput const &);
+  // These evaluate named stages only; neither function ranks candidates.
+  static BeamMatchResult EvaluateInstrumentationMatch(BeamMatchInput const &);
+  static BeamSelectionResult EvaluateCandidateStages(BeamSelectionInput const &);
 };
 } // namespace pdhd::diagnostics
 #endif

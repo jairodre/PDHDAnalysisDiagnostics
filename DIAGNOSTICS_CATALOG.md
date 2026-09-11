@@ -97,6 +97,15 @@ These revised sources and split jobs require a new build and runtime validation.
 Startup logging records the selected data/MC tags and evaluation settings;
 bounded event messages identify missing, non-unique, successfully extracted, or
 failed beam records; `endJob` prints complete processing and trigger counts.
+`PrintEventDetailsToStdout` provides a bounded BeamlineReco-style report with
+the trigger/match decision, general-trigger timestamp, magnet current, all
+momenta, aligned TOF/channel pairs, CKov values and provenance, PID candidates,
+all configured monitor fiber IDs/timestamps/glitch masks, and every projected
+beamline track. Monitor IDs and glitches use flat vectors with monitor-aligned
+offsets, avoiding nested STL ROOT branches. `MaxEventDetailPrintouts: 0` is intentionally reserved for a
+small inspection job that needs every eligible event printed.
+The final summary is also written to stdout by default, matching the established
+calorimetry-module pattern so message-service category filtering cannot hide it.
 For the tested 2024 full-reconstructed data, decoded LLT frames are absent. The
 data job uses the producer's supported `SkipLLT` mode. It records the exact
 Cherenkov values passed by `ProtoDUNEBeamEvent` to `GetPID`, so the PID result
@@ -107,13 +116,23 @@ status/pressure sources and validity, PID method, and whether non-nominal input
 handling was used. For this data path,
 `non_nominal_input_handling_used=true` explicitly
 identifies `SkipLLT`; it is a diagnostic alternative and is not equivalent to
-an LLT-complete beam event. The `*_value_available` branches describe whether
-values exist, while `*_provenance_valid` states whether their detector origin
-has been validated. This distinction is required because `SkipLLT` can leave
-zero-valued Cherenkov fields that `GetPID` still consumes.
+an LLT-complete beam event. The `*_recorded` branches state that a BeamEvent
+getter returned a finite/non-sentinel field; `*_value_available` requires that
+recorded field to also have validated detector provenance. This distinction is
+required because `SkipLLT` can leave zero-valued Cherenkov fields that `GetPID`
+still consumes.
+The direct `ckov[01]_pressure_beamevent` values and the separate
+`ckov[01]_pressure_ifbeam` view are both retained. The IFBeam values are copied
+only when the current-job `pdhd_beamevent` producer, configured channel mapping,
+and both CKov timestamps are certified. Until then, their record-found flags are
+false and their values are NaN; no unvalidated BeamEvent zero is relabeled as an
+IFBeam pressure.
 `HasPerfectBeamMomentum` stores the result returned by the official
 `ProtoDUNEBeamlineUtils::HasPerfectBeamMomentum` method; it is not the nominal
 beam-momentum setting.
+See [Beamline implementation notes](BEAMLINE_IMPLEMENTATION_NOTES.md) for the
+retained H4-VLE, IFBeam, and PDHD HSI/LLT provenance rules used by future beam
+diagnostics.
 Trigger branches follow their official method names. For PDHD,
 `IsGoodBeamlineTrigger` is the supported decision and combines
 `GetTimingTrigger()==12` with `CheckIsMatched`. `GetBITrigger` is retained only
@@ -227,15 +246,36 @@ only.
 
 ### PDHDBeamSelectionStages
 
-Records every component of the nominal data-like beam selection: trigger quality,
-beamline-track multiplicity, Pandora beam primary/type, official position and
-direction residuals, candidate rank, final decision, and exact cut source/values.
-The same reconstructed logic runs on data and MC; MC truth supplies efficiency,
-purity, wrong-candidate, and staged reconstruction metrics afterward. Limitation:
-official SP cuts require demonstrated PDHD applicability. The implementation
-uses the measured or simulated beam-instrumentation track for the nominal match,
-loads the official data window for the configured momentum, writes every stage,
-and never reads truth. Validation: static inspection only; not compiled or run.
+Records trigger quality, beamline-track multiplicity, Pandora beam-slice PFPs,
+position/direction residuals, ambiguity, and every decision component. The same
+reconstructed logic runs on data and MC; truth is not read. The nominal
+candidate is a primary PFP in Pandora's `IsTestBeam` slice with exactly one
+reconstructed representation: a track or a shower. A PFP associated with both,
+with multiple objects, or with neither is written as a diagnostic row but cannot
+pass; the code never chooses a preferred association.
+
+The common `reco_candidate_type` is `0=none`, `1=track`, `2=shower`, or
+`3=ambiguous`; `tpc_reference_method` is `0=unavailable`, `1=track local
+segment`, or `2=ShowerStart/Direction`. DeltaX and DeltaY are the common TPC
+reference point minus the fitted beamline-track end. For tracks, the direction
+is the chord over the first configurable `TPCEntryDirectionLengthCm` (default
+5 cm) after lower-Z entry; for showers it is the reconstructed initial shower
+direction. A shower has no artificial sampled-track length, so that branch is
+NaN. These residuals are stored without SP `IsBeamlike` or inherited numerical
+windows, so they can define a validated HD selection later. Metadata, slice,
+track, and shower cardinality branches distinguish missing associations from
+rejection. Validation: static inspection only; not compiled or run.
+
+Later analyses split the generic selected sample without changing its beam tag:
+
+| Analysis view | Required branches | Subsequent object-specific diagnostics |
+|---|---|---|
+| Common beam candidate | `is_selected` | Event quality, external beamline track, Pandora beam slice |
+| Hadron track candidate | `is_selected_track` or `is_selected && reco_candidate_type==1` | dE/dx, range, chi2 PID, topology, and beam-instrument PID/TOF if wanted |
+| EM shower candidate | `is_selected_shower` or `is_selected && reco_candidate_type==2` | CNN EM/track/Michel scores, shower quality, calorimetric E/p, and topology |
+
+Beam-instrumentation TOF/PID is intentionally retained as an independent input;
+it does not choose the track versus shower representation in this module.
 
 ### PDHDCosmicSelectionStages
 
@@ -271,8 +311,8 @@ the online “latest” LArSoft documentation may describe a different release.
 
 The algorithms deliberately do not discover products or write TTrees. Modules
 must obtain official art/LArSoft associations, record their source, and pass the
-observed facts to these deterministic calculations. `BeamSelectionAlg` consumes
-official data cut values supplied by FHiCL rather than calling the truth-assisted
-MC branch of `ProtoDUNEBeamCuts::IsBeamlike`. `RecoTruthMatchAlg` does not replace
-BackTracker or `ProtoDUNETruthUtils`; it standardizes metrics after those tools
-provide hit, charge, or energy contributions.
+observed facts to these deterministic calculations. `BeamSelectionAlg` computes
+explicit beamline-end to TPC-entry observables and contains no inherited cut
+table or `ProtoDUNEBeamCuts::IsBeamlike` call. `RecoTruthMatchAlg` does not
+replace BackTracker or `ProtoDUNETruthUtils`; it standardizes metrics after
+those tools provide hit, charge, or energy contributions.

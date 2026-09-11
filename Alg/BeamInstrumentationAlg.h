@@ -9,6 +9,7 @@
 #ifndef PROTODUNEANA_PDHDANALYSISDIAGNOSTICS_BEAMINSTRUMENTATIONALG_H
 #define PROTODUNEANA_PDHDANALYSISDIAGNOSTICS_BEAMINSTRUMENTATIONALG_H
 #include "protoduneana/PDHDAnalysisDiagnostics/Alg/BeamSelectionAlg.h"
+#include <limits>
 #include <string>
 #include <vector>
 namespace beam {
@@ -31,14 +32,27 @@ struct BeamInstrumentationRecord {
   // fields through IsGoodBeamlineTrigger for the supported trigger decision.
   int timingTrigger = -1, beamTrigger = -1;
   bool triggersMatched = false;
+  // BeamEvent preserves the matched general-trigger timestamp as seconds plus
+  // nanoseconds. Fiber timestamps retain the producer's native convention.
+  double generalTriggerSeconds = std::numeric_limits<double>::quiet_NaN();
+  double generalTriggerNanoseconds = std::numeric_limits<double>::quiet_NaN();
+  double magnetCurrent = std::numeric_limits<double>::quiet_NaN();
   std::vector<double> momentaGeV, tofNs;
   std::vector<int> tofChannels, pidCandidates;
   // Raw Cherenkov values are validated by the calling mode configuration.
+  // Keep unavailable fields visibly distinct from physical off (status 0) or
+  // on (status 1) responses. Extract() overwrites these with the direct
+  // ProtoDUNEBeamEvent getters when a beam event is available.
   int ckov0Status = -1, ckov1Status = -1;
-  double ckov0Pressure = 0., ckov1Pressure = 0.;
+  double ckov0Pressure = std::numeric_limits<double>::quiet_NaN();
+  double ckov1Pressure = std::numeric_limits<double>::quiet_NaN();
   std::vector<BeamTrackRecord> tracks;
   std::vector<std::string> monitorNames;
+  std::vector<int> monitorAvailable;
   std::vector<int> activeFiberCounts;
+  std::vector<double> fiberTimestampRaw;
+  std::vector<std::vector<short>> activeFiberIds;
+  std::vector<std::vector<int>> glitchFiberIndices;
   BeamReferenceSource source = BeamReferenceSource::Unavailable;
 };
 class BeamInstrumentationAlg {

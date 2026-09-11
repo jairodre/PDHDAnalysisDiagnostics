@@ -3,6 +3,8 @@
 #include "protoduneana/PDHDAnalysisDiagnostics/Alg/BeamInstrumentationAlg.h"
 #include "dunecore/DuneObj/ProtoDUNEBeamEvent.h"
 #include "protoduneana/Utilities/ProtoDUNEBeamlineUtils.h"
+#include <limits>
+#include <utility>
 namespace pdhd::diagnostics {
 BeamInstrumentationRecord BeamInstrumentationAlg::Extract(
     beam::ProtoDUNEBeamEvent const &e, protoana::ProtoDUNEBeamlineUtils &utils,
@@ -16,6 +18,9 @@ BeamInstrumentationRecord BeamInstrumentationAlg::Extract(
   // to -1 and uses timing-trigger plus beam-spill matching instead.
   r.beamTrigger = e.GetBITrigger();
   r.triggersMatched = e.CheckIsMatched();
+  r.generalTriggerSeconds = e.GetT0Sec();
+  r.generalTriggerNanoseconds = e.GetT0Nano();
+  r.magnetCurrent = e.GetMagnetCurrent();
   r.triggerEvaluated = evaluateTrigger;
   // Official PDHD decision: GetTimingTrigger()==12 && CheckIsMatched().
   if (evaluateTrigger) {
@@ -47,10 +52,27 @@ BeamInstrumentationRecord BeamInstrumentationAlg::Extract(
                         {sd.X(), sd.Y(), sd.Z()},
                         {ed.X(), ed.Y(), ed.Z()}});
   }
-  // Monitor occupancy exposes beam-profile inputs without storing fiber hits.
+  // Preserve profile-monitor content, including the official glitch mask, so
+  // later studies can reproduce momentum and beamline-track multiplicities.
   for (auto const &name : monitors) {
+    auto const &fbm = e.GetFBM(name);
     r.monitorNames.push_back(name);
-    r.activeFiberCounts.push_back(e.GetActiveFibers(name).size());
+    r.monitorAvailable.push_back(fbm.ID >= 0 ? 1 : 0);
+    r.fiberTimestampRaw.push_back(
+        fbm.ID >= 0 ? fbm.timeStamp
+                    : std::numeric_limits<double>::quiet_NaN());
+    r.activeFiberIds.push_back(fbm.ID >= 0 ? fbm.active
+                                            : std::vector<short>{});
+    r.activeFiberCounts.push_back(r.activeFiberIds.back().size());
+    std::vector<int> glitches;
+    if (fbm.ID >= 0) {
+      for (std::size_t fiber = 0; fiber < fbm.glitch_mask.size(); ++fiber) {
+        if (fbm.glitch_mask[fiber]) {
+          glitches.push_back(static_cast<int>(fiber));
+        }
+      }
+    }
+    r.glitchFiberIndices.push_back(std::move(glitches));
   }
   return r;
 }

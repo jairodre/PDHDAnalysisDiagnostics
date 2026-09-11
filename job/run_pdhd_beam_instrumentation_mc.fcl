@@ -40,4 +40,9 @@ physics.analyzers.beamInstrumentation.CherenkovStatusSource: "unvalidated_simula
 physics.analyzers.beamInstrumentation.CherenkovStatusProvenanceValid: false
 physics.analyzers.beamInstrumentation.CherenkovPressureSource: "unvalidated_simulated_pressure"
 physics.analyzers.beamInstrumentation.CherenkovPressureProvenanceValid: false
+physics.analyzers.beamInstrumentation.IFBeamCherenkovSource: "not_applicable_MC"
+physics.analyzers.beamInstrumentation.IFBeamCherenkovProvenanceValid: false
+physics.analyzers.beamInstrumentation.IFBeamTimestampUnit: "not_applicable_MC"
+physics.analyzers.beamInstrumentation.IFBeamCKov0ChannelName: "not_applicable_MC"
+physics.analyzers.beamInstrumentation.IFBeamCKov1ChannelName: "not_applicable_MC"
 physics.analyzers.beamInstrumentation.NonNominalInputHandlingUsed: false
