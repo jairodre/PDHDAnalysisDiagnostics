@@ -9,7 +9,8 @@
  * quantities remain independent. MC truth labels are attached only by the truth
  * matcher and never participate in reconstructed feature calculation.
  *
- * Status: structure-only; no art plugin is registered yet.
+ * Status: template-only contract; intentionally unbuilt, unscheduled, and
+ * without an art plugin registration.
  */
 
 // TODO: Verify HD calibration support before defining calibrated energy branches.

@@ -21,29 +21,38 @@ class ProtoDUNEBeamlineUtils;
 namespace pdhd::diagnostics {
 struct BeamTrackRecord {
   // Beamline-extrapolated endpoints are in cm; directions are unitless.
-  Point3D start, end;
-  Direction3D startDirection, endDirection;
+  Point3D start;
+  Point3D end;
+  Direction3D startDirection;
+  Direction3D endDirection;
 };
 struct BeamInstrumentationRecord {
   // Trigger/PID booleans are meaningful only when their evaluated flag is set.
-  bool valid = false, goodTrigger = false, triggerEvaluated = false,
-       hasPerfectBeamMomentum = false;
+  bool valid = false;
+  bool goodTrigger = false;
+  bool triggerEvaluated = false;
+  bool hasPerfectBeamMomentum = false;
   // PDHD BeamEvent sets the legacy BI trigger to -1; use the timing/match
   // fields through IsGoodBeamlineTrigger for the supported trigger decision.
-  int timingTrigger = -1, beamTrigger = -1;
+  int timingTrigger = -1;
+  int beamTrigger = -1;
   bool triggersMatched = false;
   // BeamEvent preserves the matched general-trigger timestamp as seconds plus
   // nanoseconds. Fiber timestamps retain the producer's native convention.
   double generalTriggerSeconds = std::numeric_limits<double>::quiet_NaN();
   double generalTriggerNanoseconds = std::numeric_limits<double>::quiet_NaN();
   double magnetCurrent = std::numeric_limits<double>::quiet_NaN();
-  std::vector<double> momentaGeV, tofNs;
-  std::vector<int> tofChannels, pidCandidates;
+  // Reconstructed momenta are in GeV/c; TOF values are in ns.
+  std::vector<double> momentaGeV;
+  std::vector<double> tofNs;
+  std::vector<int> tofChannels;
+  std::vector<int> pidCandidates;
   // Raw Cherenkov values are validated by the calling mode configuration.
   // Keep unavailable fields visibly distinct from physical off (status 0) or
   // on (status 1) responses. Extract() overwrites these with the direct
   // ProtoDUNEBeamEvent getters when a beam event is available.
-  int ckov0Status = -1, ckov1Status = -1;
+  int ckov0Status = -1;
+  int ckov1Status = -1;
   double ckov0Pressure = std::numeric_limits<double>::quiet_NaN();
   double ckov1Pressure = std::numeric_limits<double>::quiet_NaN();
   std::vector<BeamTrackRecord> tracks;

@@ -16,9 +16,10 @@ decisions independently auditable in data and Monte Carlo.
   modules are present as documented templates for incremental implementation.
 
 Every module has separate data and MC FHiCL files in `job/`. Implemented
-modules use runnable `run_pdhd_*_{data,mc}.fcl` entry points. Scaffold modules
-use unscheduled `run_pdhd_*_{data,mc}.fcl` templates marked `template_only`; these
-document intended inputs but must not be treated as runnable analyzers.
+modules use runnable `run_pdhd_*_{data,mc}.fcl` entry points. Template modules
+use unscheduled `run_pdhd_*_{data,mc}.fcl` tables marked `template_only`; those
+tables document intended inputs only. Installing their FHiCL or source files
+does not compile, register, schedule, or validate an analyzer.
 
 See [DIAGNOSTICS_CATALOG.md](DIAGNOSTICS_CATALOG.md) for every module's inputs,
 outputs, assumptions, limitations, and validation state. Historical scaffold

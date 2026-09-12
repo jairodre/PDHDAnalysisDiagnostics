@@ -1,9 +1,11 @@
 # Data runtime configuration for PDHDBeamSelectionStages.
 #
-# The analyzer applies the same reconstructed Pandora and beam-instrumentation
-# stages used for MC. For tested 2024 full-reconstructed data, the official
-# BeamEvent producer rebuilds `beamevent`; SkipLLT is recorded by that product
-# path and must not be interpreted as an LLT-complete trigger measurement.
+# The analyzer uses reconstructed external beam instrumentation on data. MC
+# uses generated-truth/Geant references instead; the common output residual
+# names are distinguished by `beam_reference_source`. For tested 2024
+# full-reconstructed data, the official BeamEvent producer rebuilds
+# `beamevent`; SkipLLT is recorded by that product path and must not be
+# interpreted as an LLT-complete trigger measurement.
 
 #include "BeamEvent.fcl"
 #include "services_dune.fcl"
@@ -13,8 +15,9 @@ process_name: PDHDBeamSelectionStagesData
 
 services: {
   TFileService: { fileName: "pdhd_beam_selection_stages_data.root" }
-  TimeTracker: @local::dune_time_tracker
-  MemoryTracker: @local::dune_memory_tracker
+  # TimeTracker: @local::dune_time_tracker
+  # MemoryTracker: @local::dune_memory_tracker
+  # Uncomment both only when time.db/time.dc and mem.db are needed.
   RandomNumberGenerator: {}
   message: @local::dune_message_services_prod
   FileCatalogMetadata: @local::art_file_catalog_data
@@ -56,4 +59,10 @@ physics.producers.beamevent.DebugTOFs: false
 physics.producers.beamevent.ForceRead: false
 physics.producers.beamevent.MatchTime: true
 physics.producers.beamevent.SkipLLT: true
-
+# Data comparison reference: reconstructed external beamline fitted endpoint.
+physics.analyzers.beamSelectionStages.TPCEntryDirectionLengthCm: 15.0
+# The default launcher data query is run 28547 (1 GeV/c).  Store its measured
+# beam-instrumentation momentum and CERN-calibrated PID hypotheses as
+# diagnostics; neither is a selection cut.
+physics.analyzers.beamSelectionStages.BeamInstrumentationNominalMomentumGeV: 1.0
+physics.analyzers.beamSelectionStages.EvaluateDataPID: true

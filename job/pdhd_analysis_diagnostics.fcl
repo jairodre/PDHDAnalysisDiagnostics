@@ -6,8 +6,14 @@
 BEGIN_PROLOG
 
 pdhd_analysis_diagnostics: {
+  # This prolog supplies shared analyzer tables. It is not a runnable job;
+  # select an explicit data or MC run_pdhd_*.fcl entry point instead.
   mode: "auto"
+  # Schema 0 preserves the current branch names; do not infer an output schema
+  # revision merely from these shared configuration defaults.
   schema_version: 0
+  # Each implemented analyzer records missing configured products explicitly.
+  # It never searches for an alternative producer under a different label.
   require_configured_products: false
 }
 
@@ -46,28 +52,41 @@ pdhd_beam_instrumentation: {
   PrintEventDetailsToStdout: true
   MaxEventDetailPrintouts: 3
   # Keep every H4-VLE PDHD profile monitor in the diagnostic output.
-  FiberMonitorNames: ["XBPF022697", "XBPF022698", "XBPF022701", "XBPF022702", "XBPF022707", "XBPF022708", "XBPF022716", "XBPF022717"]
+  FiberMonitorNames: [
+    "XBPF022697", "XBPF022698", "XBPF022701", "XBPF022702",
+    "XBPF022707", "XBPF022708", "XBPF022716", "XBPF022717"
+  ]
   BeamlineUtils: @local::standard_protodunebeamlineutils
 }
 
 pdhd_beam_selection_stages: {
   module_type: "PDHDBeamSelectionStages"
   DataBeamTag: "beamevent"
-  MCBeamTag: "generator"
+  # MC does not pretend a generator product is reconstructed beam
+  # instrumentation. MCTruth identifies the generated beam primary; largeant
+  # gives its transported trajectory at the declared comparison surface.
+  MCTruthTag: "generator"
+  MCParticleTag: "largeant"
+  MCTruthBeamOrigin: 4
+  # PDG plus initial energy maps generator to Geant; TrackIDs are distinct.
+  MCTruthGeantEnergyToleranceGeV: 1.e-5
+  MCTruthReferenceMinimumZCm: 0.0
+  MCTruthReferenceMaximumZCm: 600.0
   PFParticleTag: "pandora"
   # Separate tags make the Pandora beam-slice source auditable.
   PFParticleMetadataTag: "pandora"
   PFParticleSliceTag: "pandora"
   TrackTag: "pandoraTrack"
   ShowerTag: "pandoraShower"
-  # Passed to BeamInstrumentationAlg only. PID evaluation is disabled here,
-  # so it does not define a candidate cut or any beam--TPC threshold.
+  # Passed to BeamInstrumentationAlg only. These observables are recorded for
+  # per-track display labels and never define a candidate cut or beam--TPC
+  # threshold. Enable PID only with a supported nominal beam momentum.
   BeamInstrumentationNominalMomentumGeV: 5.0
+  EvaluateDataPID: false
   # A candidate has exactly one reconstructed representation: track or shower.
   # A PFP with both types, multiple objects, or neither is kept as diagnostic
   # output but cannot pass. Neither type is silently preferred.
   RequireGoodDataTrigger: true
-  RequireGoodMCTrigger: true
   # The nominal conjunction stops at event quality, one beamline track,
   # Pandora beam-slice primary, and one unambiguous reconstructed object. The
   # endpoint/entry residuals below are stored for a later HD-specific cut.

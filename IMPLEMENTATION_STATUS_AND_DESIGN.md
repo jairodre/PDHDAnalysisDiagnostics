@@ -14,9 +14,10 @@ compiled and ran on data; that test established that the selected reconstructed
 files do not store `beamevent`. Separate data and MC jobs now handle this product
 difference explicitly, but the revised sources still require a user build and
 runtime validation. The two beam analyzer plugins are registered; all other
-module templates intentionally perform no event processing. Add modules one at a
-time only after their product labels, schemas, units, validity behavior, and
-data/MC contract have been reviewed.
+module files are template-only contracts: they are neither compiled nor
+registered, and their FHiCL tables are intentionally unscheduled. Add modules
+one at a time only after their product labels, schemas, units, validity
+behavior, and data/MC contract have been reviewed.
 
 ## Design rules
 

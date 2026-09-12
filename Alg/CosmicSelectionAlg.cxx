@@ -4,29 +4,35 @@
 #include <cmath>
 namespace pdhd::diagnostics {
 CosmicSelectionResult
-CosmicSelectionAlg::Select(CosmicSelectionInput const &in,
-                           CosmicSelectionConfig const &cfg) {
-  CosmicSelectionResult r;
-  r.passesClearCosmic =
-      !cfg.requireClearCosmic || (in.clearCosmicValid && in.isClearCosmic);
-  r.passesBdt =
-      !cfg.requireBdt || (in.bdtValid && std::isfinite(in.cosmicBdtScore) &&
-                          in.cosmicBdtScore >= cfg.minimumCosmicBdtScore);
-  r.passesStartContained =
-      !cfg.requireStartContained ||
-      (in.containment.volumeValid && in.containment.startContained);
-  r.passesEndContained =
-      !cfg.requireEndContained ||
-      (in.containment.volumeValid && in.containment.endContained);
-  r.passesBothEndpointsContained =
-      !cfg.requireBothEndpointsContained ||
-      (in.containment.volumeValid && in.containment.bothEndpointsContained);
-  r.passesFullTrajectoryContained =
-      !cfg.requireFullTrajectoryContained ||
-      (in.containment.volumeValid && in.containment.allSampledPointsContained);
-  r.selected = r.passesClearCosmic && r.passesBdt && r.passesStartContained &&
-               r.passesEndContained && r.passesBothEndpointsContained &&
-               r.passesFullTrajectoryContained;
-  return r;
+CosmicSelectionAlg::Select(CosmicSelectionInput const &input,
+                           CosmicSelectionConfig const &config) {
+  CosmicSelectionResult result;
+
+  // A disabled stage passes; an enabled stage requires valid input.
+  result.passesClearCosmic = !config.requireClearCosmic ||
+                             (input.clearCosmicValid && input.isClearCosmic);
+  result.passesBdt = !config.requireBdt ||
+                     (input.bdtValid && std::isfinite(input.cosmicBdtScore) &&
+                      input.cosmicBdtScore >= config.minimumCosmicBdtScore);
+
+  bool const containmentValid = input.containment.volumeValid;
+  result.passesStartContained =
+      !config.requireStartContained ||
+      (containmentValid && input.containment.startContained);
+  result.passesEndContained =
+      !config.requireEndContained ||
+      (containmentValid && input.containment.endContained);
+  result.passesBothEndpointsContained =
+      !config.requireBothEndpointsContained ||
+      (containmentValid && input.containment.bothEndpointsContained);
+  result.passesFullTrajectoryContained =
+      !config.requireFullTrajectoryContained ||
+      (containmentValid && input.containment.allSampledPointsContained);
+
+  result.selected = result.passesClearCosmic && result.passesBdt &&
+                    result.passesStartContained && result.passesEndContained &&
+                    result.passesBothEndpointsContained &&
+                    result.passesFullTrajectoryContained;
+  return result;
 }
 } // namespace pdhd::diagnostics

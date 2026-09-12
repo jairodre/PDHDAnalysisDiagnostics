@@ -9,7 +9,8 @@
  * to drift-X; never overwrite the uncorrected reconstructed X coordinate. This
  * information is required to audit containment and blip positions in real data.
  *
- * Status: structure-only; no art plugin is registered yet.
+ * Status: template-only contract; intentionally unbuilt, unscheduled, and
+ * without an art plugin registration.
  */
 
 // TODO: Inventory the production-specific timing products before implementation.

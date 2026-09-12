@@ -16,23 +16,46 @@ class Calorimetry;
 namespace pdhd::diagnostics {
 enum class CalorimetryVariant { Unknown, SCE, NoSCE };
 struct CalorimetryPoint {
-  std::size_t pointIndex = 0, trajectoryPointIndex = 0;
-  bool trajectoryPointIndexValid = false, positionValid = false;
-  bool dEdxValid = false, dQdxValid = false, residualRangeValid = false;
-  bool pitchValid = false, electricFieldValid = false, phiValid = false;
-  double xCm = 0., yCm = 0., zCm = 0., dEdxMeVPerCm = 0., dQdx = 0.;
-  double residualRangeCm = 0., pitchCm = 0., electricField = 0.,
-         phiDegrees = 0.;
+  std::size_t pointIndex = 0;
+  // Valid only when the corresponding Calorimetry vector had this element.
+  std::size_t trajectoryPointIndex = 0;
+  bool trajectoryPointIndexValid = false;
+  bool positionValid = false;
+  bool dEdxValid = false;
+  bool dQdxValid = false;
+  bool residualRangeValid = false;
+  bool pitchValid = false;
+  bool electricFieldValid = false;
+  bool phiValid = false;
+  // Coordinates, dE/dx, residual range, and pitch use cm-based units.
+  double xCm = 0.;
+  double yCm = 0.;
+  double zCm = 0.;
+  double dEdxMeVPerCm = 0.;
+  // Units are carried by CalorimetrySummary::dQdxUnits.
+  double dQdx = 0.;
+  double residualRangeCm = 0.;
+  double pitchCm = 0.;
+  // Producer convention; this layer does not assign units to E field or phi.
+  double electricField = 0.;
+  double phiDegrees = 0.;
 };
 struct CalorimetrySummary {
   bool valid = false;
-  unsigned int cryostat = 0, tpc = 0, plane = 0;
-  double kineticEnergyMeV = 0., rangeCm = 0., sumPitchCm = 0.,
-         maximumPitchCm = 0.;
-  std::size_t pointCount = 0, completePointCount = 0, invalidPitchCount = 0;
+  unsigned int cryostat = 0;
+  unsigned int tpc = 0;
+  unsigned int plane = 0;
+  double kineticEnergyMeV = 0.;
+  double rangeCm = 0.;
+  double sumPitchCm = 0.;
+  double maximumPitchCm = 0.;
+  std::size_t pointCount = 0;
+  std::size_t completePointCount = 0;
+  std::size_t invalidPitchCount = 0;
   CalorimetryVariant variant = CalorimetryVariant::Unknown;
   bool calibrated = false;
-  std::string producer, dQdxUnits;
+  std::string producer;
+  std::string dQdxUnits;
 };
 struct CalorimetryResult {
   CalorimetrySummary summary;

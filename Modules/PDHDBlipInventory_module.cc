@@ -9,7 +9,8 @@
  * Keep raw and corrected coordinates separate. Reconstructed blip energy must
  * never be labeled as truth deposited or particle kinetic energy.
  *
- * Status: structure-only; no art plugin is registered yet.
+ * Status: template-only contract; intentionally unbuilt, unscheduled, and
+ * without an art plugin registration.
  */
 
 // TODO: Confirm the local Blip data-product API and calibration units first.

@@ -10,7 +10,8 @@
  * exact endpoint flag; the module must not silently strengthen it. MC truth PDG
  * categories should use mutually exclusive muon/proton/pion/kaon/other definitions.
  *
- * Status: structure-only; no art plugin is registered yet.
+ * Status: template-only contract; intentionally unbuilt, unscheduled, and
+ * without an art plugin registration.
  */
 
 // TODO: Define named selection configurations without imposing cuts by default.

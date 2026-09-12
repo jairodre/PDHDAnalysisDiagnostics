@@ -10,7 +10,8 @@
  * be additional derived columns. Calorimetry, PID, truth, and selection stay in
  * their dedicated modules so a geometry inventory works identically on data/MC.
  *
- * Status: structure-only; no art plugin is registered yet.
+ * Status: template-only contract; intentionally unbuilt, unscheduled, and
+ * without an art plugin registration.
  */
 
 // TODO: Define geometry service boundaries and fiducial configuration in cm.

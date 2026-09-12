@@ -1,8 +1,8 @@
 # MC runtime configuration for PDHDBeamSelectionStages.
 #
-# This job applies the data-like reconstructed selection to simulated beam
-# instrumentation and Pandora objects. MC truth is intentionally absent from
-# the acceptance decision and can be joined later for performance validation.
+# This job uses the reconstructed Pandora selection with a generated beam
+# primary from `generator` and its Geant trajectory from `largeant`. The true
+# PDG labels output rows but never apply a species cut to a reconstructed PFP.
 
 #include "messageservice.fcl"
 #include "pdhd_analysis_diagnostics_mc.fcl"
@@ -29,3 +29,11 @@ physics: {
   end_paths: [analysis]
 }
 
+# MC comparison reference: first Geant point in this explicit PDHD Z window.
+# Override these tags only after checking the input ART product inventory.
+physics.analyzers.beamSelectionStages.MCTruthTag: "generator"
+physics.analyzers.beamSelectionStages.MCParticleTag: "largeant"
+physics.analyzers.beamSelectionStages.MCTruthBeamOrigin: 4
+physics.analyzers.beamSelectionStages.MCTruthGeantEnergyToleranceGeV: 1.e-5
+physics.analyzers.beamSelectionStages.MCTruthReferenceMinimumZCm: 0.0
+physics.analyzers.beamSelectionStages.MCTruthReferenceMaximumZCm: 600.0

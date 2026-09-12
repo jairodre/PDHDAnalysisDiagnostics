@@ -9,11 +9,13 @@ TruthMatchResult
 RecoTruthMatchAlg::Rank(std::vector<TruthContribution> const &input,
                         MatchEvidence evidence, std::string source,
                         double tieTolerance) {
-  TruthMatchResult r;
-  r.evidence = evidence;
-  r.source = std::move(source);
-  if (!std::isfinite(tieTolerance) || tieTolerance < 0.)
-    return r;
+  TruthMatchResult result;
+  result.evidence = evidence;
+  result.source = std::move(source);
+  if (!std::isfinite(tieTolerance) || tieTolerance < 0.) {
+    // A non-negative finite tolerance is required to define best-match ties.
+    return result;
+  }
   for (auto const &c : input) {
     if (!std::isfinite(c.sharedEvidence) || c.sharedEvidence < 0.)
       continue;
@@ -30,20 +32,21 @@ RecoTruthMatchAlg::Rank(std::vector<TruthContribution> const &input,
       m.completeness = c.sharedEvidence / c.truthTotalEvidence;
       m.completenessValid = true;
     }
-    r.matches.push_back(m);
+    result.matches.push_back(m);
   }
-  std::stable_sort(r.matches.begin(), r.matches.end(),
+  std::stable_sort(result.matches.begin(), result.matches.end(),
                    [](auto const &a, auto const &b) {
                      if (a.sharedEvidence != b.sharedEvidence)
                        return a.sharedEvidence > b.sharedEvidence;
                      return a.truthTrackId < b.truthTrackId;
                    });
-  for (std::size_t i = 0; i < r.matches.size(); ++i)
-    r.matches[i].rank = i;
-  r.valid = !r.matches.empty();
-  r.ambiguousBest = r.matches.size() > 1 &&
-                    std::abs(r.matches[0].sharedEvidence -
-                             r.matches[1].sharedEvidence) <= tieTolerance;
-  return r;
+  for (std::size_t i = 0; i < result.matches.size(); ++i)
+    result.matches[i].rank = i;
+  result.valid = !result.matches.empty();
+  result.ambiguousBest =
+      result.matches.size() > 1 &&
+      std::abs(result.matches[0].sharedEvidence -
+               result.matches[1].sharedEvidence) <= tieTolerance;
+  return result;
 }
 } // namespace pdhd::diagnostics

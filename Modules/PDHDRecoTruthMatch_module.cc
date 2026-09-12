@@ -10,7 +10,8 @@
  * flags from truth PFP match through track/shower and nominal beam selection.
  * Data events receive explicit unavailable status and no truth-service calls.
  *
- * Status: structure-only; MC-only content and no art plugin is registered yet.
+ * Status: template-only contract; MC-only content, intentionally unbuilt,
+ * unscheduled, and without an art plugin registration.
  */
 
 // TODO: Fix denominators and existing-association precedence before implementation.

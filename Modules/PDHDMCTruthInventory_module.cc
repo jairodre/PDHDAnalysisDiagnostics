@@ -10,7 +10,8 @@
  * a generator primary with a Geant4 particle or a reconstructed beam candidate.
  * On real data, record module/product unavailability without calling MC services.
  *
- * Status: structure-only; no art plugin is registered yet.
+ * Status: template-only contract; intentionally unbuilt, unscheduled, and
+ * without an art plugin registration.
  */
 
 // TODO: Implement after generator labels and beam-origin definitions are fixed.

@@ -9,7 +9,8 @@
  * Track association must not be inferred solely from a plotting distance. MC
  * truth linkage is validation-only and unavailable on data by construction.
  *
- * Status: structure-only; no art plugin is registered yet.
+ * Status: template-only contract; intentionally unbuilt, unscheduled, and
+ * without an art plugin registration.
  */
 
 // TODO: Separate producer associations from analysis-level geometric candidates.

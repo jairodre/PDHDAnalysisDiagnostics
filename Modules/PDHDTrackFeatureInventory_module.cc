@@ -10,7 +10,8 @@
  * no fallback score may overwrite another score. These are observables for later
  * cut development, not automatic beam or cosmic acceptance.
  *
- * Status: structure-only; no art plugin is registered yet.
+ * Status: template-only contract; intentionally unbuilt, unscheduled, and
+ * without an art plugin registration.
  */
 
 // TODO: Confirm ParticleID score conventions and TrackMomentumCalculator support.

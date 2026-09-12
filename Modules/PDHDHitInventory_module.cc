@@ -10,7 +10,8 @@
  * validity. Do not save raw waveforms here; provide configurable row limits or
  * object-based filtering to control output size without biasing default summaries.
  *
- * Status: structure-only; no art plugin is registered yet.
+ * Status: template-only contract; intentionally unbuilt, unscheduled, and
+ * without an art plugin registration.
  */
 
 // TODO: Define hit selection and CNN label configuration before enabling output.

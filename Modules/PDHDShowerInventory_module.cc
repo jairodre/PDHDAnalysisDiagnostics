@@ -9,7 +9,8 @@
  * PFP is a shower; preserve track/shower multiplicities and ambiguity explicitly.
  * Calibrated shower features and truth matching remain separate extensions.
  *
- * Status: structure-only; no art plugin is registered yet.
+ * Status: template-only contract; intentionally unbuilt, unscheduled, and
+ * without an art plugin registration.
  */
 
 // TODO: Verify which shower fields and associations exist in PDHD reconstruction.

@@ -10,7 +10,8 @@
  * point-quality flags so extreme pitch or invalid coordinates can be excluded
  * reproducibly without discarding the parent track.
  *
- * Status: structure-only; no art plugin is registered yet.
+ * Status: template-only contract; intentionally unbuilt, unscheduled, and
+ * without an art plugin registration.
  */
 
 // TODO: Implement through CalorimetryAlg after unit and validity conventions.

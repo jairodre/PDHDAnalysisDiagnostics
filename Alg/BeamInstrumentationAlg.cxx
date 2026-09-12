@@ -59,10 +59,8 @@ BeamInstrumentationRecord BeamInstrumentationAlg::Extract(
     r.monitorNames.push_back(name);
     r.monitorAvailable.push_back(fbm.ID >= 0 ? 1 : 0);
     r.fiberTimestampRaw.push_back(
-        fbm.ID >= 0 ? fbm.timeStamp
-                    : std::numeric_limits<double>::quiet_NaN());
-    r.activeFiberIds.push_back(fbm.ID >= 0 ? fbm.active
-                                            : std::vector<short>{});
+        fbm.ID >= 0 ? fbm.timeStamp : std::numeric_limits<double>::quiet_NaN());
+    r.activeFiberIds.push_back(fbm.ID >= 0 ? fbm.active : std::vector<short>{});
     r.activeFiberCounts.push_back(r.activeFiberIds.back().size());
     std::vector<int> glitches;
     if (fbm.ID >= 0) {

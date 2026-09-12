@@ -9,7 +9,8 @@
  * Keep PFP metadata scores distinct from hit-level CNN scores. Store every PFP,
  * including cosmics and ambiguous objects; selection decisions are separate.
  *
- * Status: structure-only; no art plugin is registered yet.
+ * Status: template-only contract; intentionally unbuilt, unscheduled, and
+ * without an art plugin registration.
  */
 
 // TODO: Fix stable hierarchy-key and missing-metadata policies before coding.

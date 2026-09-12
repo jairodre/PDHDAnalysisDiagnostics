@@ -1,5 +1,6 @@
-# Data-mode scaffold. This table only records intended mode; it does not
-# schedule a module. Truth analyzers must remain disabled for real data.
+# Data-mode scaffold for shared diagnostic configuration. It records only the
+# intended mode; scheduling is owned by the including job. Truth analyzers must
+# remain disabled for real data.
 
 #include "pdhd_analysis_diagnostics.fcl"
 

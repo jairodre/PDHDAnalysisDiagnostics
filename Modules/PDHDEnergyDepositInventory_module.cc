@@ -10,7 +10,8 @@
  * from kinetic energy and reconstructed calorimetric energy. Provide configurable
  * thinning/aggregation because unbounded deposit-level output can be very large.
  *
- * Status: structure-only; MC-only and not registered as a plugin.
+ * Status: template-only contract; MC-only, intentionally unbuilt, unscheduled,
+ * and without an art plugin registration.
  */
 
 // TODO: Choose the production-available truth product before fixing the schema.

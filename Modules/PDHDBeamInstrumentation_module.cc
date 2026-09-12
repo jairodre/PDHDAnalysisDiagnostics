@@ -135,7 +135,9 @@ private:
   // Stable per-event storage used directly by the output tree branches.
   TTree *tree_ = nullptr;
   unsigned int run_ = 0, subrun_ = 0, event_ = 0;
-  bool isData_ = false, available_ = false, unique_ = false;
+  bool isData_ = false;
+  // These names describe product cardinality, not a physics selection.
+  bool productAvailable_ = false, exactlyOneBeamEvent_ = false;
   bool pidEvaluated_ = false;
   bool mcBeamPdgValid_ = false;
   // Recorded means the BeamEvent getter returned a non-sentinel field.  A
@@ -151,7 +153,8 @@ private:
   unsigned int beamEventCount_ = 0;
   unsigned int mcTruthRecordCount_ = 0, mcBeamPrimaryCount_ = 0;
   int mcBeamPdg_ = -999;
-  std::string source_, selectedProductTag_, pidMethod_, mcBeamPdgSource_;
+  std::string extractionSource_, selectedBeamEventProductTag_, pidMethod_,
+      mcBeamPdgSource_;
   bool goodTrigger_ = false, triggerEvaluated_ = false;
   bool hasPerfectBeamMomentum_ = false, triggersMatched_ = false;
   int timingTrigger_ = -1, beamTrigger_ = -1;
@@ -219,11 +222,11 @@ void PDHDBeamInstrumentation::beginJob() {
   addBranch(*tree_, "subrun", subrun_);
   addBranch(*tree_, "event", event_);
   addBranch(*tree_, "is_data", isData_);
-  addBranch(*tree_, "product_available", available_);
-  addBranch(*tree_, "beam_event_unique", unique_);
+  addBranch(*tree_, "product_available", productAvailable_);
+  addBranch(*tree_, "beam_event_unique", exactlyOneBeamEvent_);
   addBranch(*tree_, "beam_event_count", beamEventCount_);
-  addBranch(*tree_, "source", source_);
-  addBranch(*tree_, "beam_event_product_tag", selectedProductTag_);
+  addBranch(*tree_, "source", extractionSource_);
+  addBranch(*tree_, "beam_event_product_tag", selectedBeamEventProductTag_);
   addBranch(*tree_, "beam_event_source_description",
             beamEventSourceDescription_);
   addBranch(*tree_, "beam_event_build_method", beamEventBuildMethod_);
@@ -312,8 +315,9 @@ void PDHDBeamInstrumentation::beginJob() {
 }
 void PDHDBeamInstrumentation::reset() {
   // Sentinels distinguish unavailable information from valid zero response.
-  available_ = unique_ = goodTrigger_ = triggerEvaluated_ = pidEvaluated_ =
-      hasPerfectBeamMomentum_ = triggersMatched_ = false;
+  productAvailable_ = exactlyOneBeamEvent_ = goodTrigger_ =
+      triggerEvaluated_ = pidEvaluated_ = hasPerfectBeamMomentum_ =
+          triggersMatched_ = false;
   cherenkovStatusValueAvailable_ = false;
   cherenkovPressureValueAvailable_ = false;
   cherenkovStatusRecorded_ = false;
@@ -327,8 +331,8 @@ void PDHDBeamInstrumentation::reset() {
   mcBeamPrimaryCount_ = 0;
   mcBeamPdg_ = -999;
   mcBeamPdgSource_ = "not_evaluated_data";
-  source_ = "unavailable";
-  selectedProductTag_ = "unavailable";
+  extractionSource_ = "unavailable";
+  selectedBeamEventProductTag_ = "unavailable";
   pidMethod_ = "not_evaluated";
   timingTrigger_ = beamTrigger_ = ckov0_ = ckov1_ = -1;
   ckov0Pressure_ = ckov1Pressure_ =
@@ -415,10 +419,10 @@ void PDHDBeamInstrumentation::printEventDetails(
          << "  event " << event_ << "\n"
          << "================================================================\n"
          << "[Input product]\n"
-         << "  tag                : " << selectedProductTag_ << "\n"
+         << "  tag                : " << selectedBeamEventProductTag_ << "\n"
          << "  entries            : " << beamEventCount_ << "\n"
-         << "  available / unique : " << static_cast<bool>(available_) << " / "
-         << static_cast<bool>(unique_) << "\n"
+         << "  available / unique : " << static_cast<bool>(productAvailable_)
+         << " / " << static_cast<bool>(exactlyOneBeamEvent_) << "\n"
          << "\n[Beam-event quality]\n"
          << "  timing trigger     : " << timingTrigger_ << "\n"
          << "  BI trigger         : " << beamTrigger_ << "\n"
@@ -559,177 +563,188 @@ void PDHDBeamInstrumentation::analyze(art::Event const &evt) {
     ++dataEvents_;
   } else {
     ++mcEvents_;
+    // Preserve the original ordering: MC truth is independent of BeamEvent
+    // extraction and is recorded before any instrumentation-product handling.
     fillMCBeamPdg(evt);
   }
 
-  // Data and MC consume distinct products but share the output schema.
-  auto const tag = isData_ ? dataTag_ : mcTag_;
-  selectedProductTag_ = tag.encode();
-  auto const h = evt.getHandle<std::vector<beam::ProtoDUNEBeamEvent>>(tag);
-  if (!h) {
+  // Choose the mode-specific BeamEvent product. Both modes write the same
+  // schema, so its tag remains meaningful even when the product is missing.
+  auto const selectedBeamEventTag = isData_ ? dataTag_ : mcTag_;
+  selectedBeamEventProductTag_ = selectedBeamEventTag.encode();
+  auto const beamEventHandle =
+      evt.getHandle<std::vector<beam::ProtoDUNEBeamEvent>>(selectedBeamEventTag);
+  if (!beamEventHandle) {
     if (eventMessagesEmitted_ < maxEventMessages_) {
       mf::LogWarning("PDHDBeamInstrumentation")
           << "No vector<beam::ProtoDUNEBeamEvent> for run " << run_
           << ", subrun " << subrun_ << ", event " << event_ << " using "
-          << (isData_ ? "data" : "MC") << " tag '" << tag.encode()
+          << (isData_ ? "data" : "MC") << " tag '"
+          << selectedBeamEventTag.encode()
           << "'. The event row is retained with product_available=false.";
       ++eventMessagesEmitted_;
     }
-    tree_->Fill();
-    return;
-  }
+  } else {
+    productAvailable_ = true;
+    ++productAvailableEvents_;
+    beamEventCount_ = beamEventHandle->size();
 
-  available_ = true;
-  ++productAvailableEvents_;
-  beamEventCount_ = h->size();
-
-  // Multiple beam events are ambiguous, so detailed fields are not selected.
-  unique_ = h->size() == 1;
-  if (!unique_) {
-    if (eventMessagesEmitted_ < maxEventMessages_) {
-      mf::LogWarning("PDHDBeamInstrumentation")
-          << "Expected exactly one beam event for run " << run_ << ", subrun "
-          << subrun_ << ", event " << event_ << " from tag '" << tag.encode()
-          << "', but found " << beamEventCount_
-          << ". Detailed fields remain unset and the event row is retained.";
-      ++eventMessagesEmitted_;
-    }
-    tree_->Fill();
-    return;
-  }
-
-  ++uniqueBeamEventEvents_;
-  try {
-    // Official utilities define trigger quality, momentum quality, and PID.
-    auto const src = isData_ ? BeamReferenceSource::DataInstrumentation
-                             : BeamReferenceSource::SimulatedInstrumentation;
-    auto const evaluatePid = isData_ ? evaluateDataPid_ : evaluateMcPid_;
-    pidMethod_ = evaluatePid ? "ProtoDUNEBeamlineUtils::GetPID"
-                             : "not_evaluated";
-    auto const r = BeamInstrumentationAlg::Extract(
-        h->front(), beamline_, src, nominalMomentum_,
-        isData_ || evaluateMcTrigger_, evaluatePid, monitors_);
-    source_ = isData_ ? "data_instrumentation" : "simulated_instrumentation";
-    goodTrigger_ = r.goodTrigger;
-    triggerEvaluated_ = r.triggerEvaluated;
-    pidEvaluated_ = evaluatePid;
-    hasPerfectBeamMomentum_ = r.hasPerfectBeamMomentum;
-    timingTrigger_ = r.timingTrigger;
-    beamTrigger_ = r.beamTrigger;
-    triggersMatched_ = r.triggersMatched;
-    generalTriggerSeconds_ = r.generalTriggerSeconds;
-    generalTriggerNanoseconds_ = r.generalTriggerNanoseconds;
-    magnetCurrent_ = r.magnetCurrent;
-    momenta_ = r.momentaGeV;
-    tof_ = r.tofNs;
-    tofChannels_ = r.tofChannels;
-    pidCandidates_ = r.pidCandidates;
-    // Store the exact Cherenkov values seen by GetPID. Separate provenance
-    // flags identify whether they came from validated detector information.
-    ckov0_ = r.ckov0Status;
-    ckov1_ = r.ckov1Status;
-    ckov0Pressure_ = r.ckov0Pressure;
-    ckov1Pressure_ = r.ckov1Pressure;
-    cherenkovStatusRecorded_ = ckov0_ >= 0 && ckov1_ >= 0;
-    cherenkovPressureRecorded_ = std::isfinite(ckov0Pressure_) &&
-                                 std::isfinite(ckov1Pressure_);
-    // SkipLLT emits default-looking values when LLT information is absent.
-    // Keep those raw fields inspectable, but do not make them usable inputs to
-    // PID or analysis until the channel source has been validated.
-    cherenkovStatusValueAvailable_ =
-        cherenkovStatusRecorded_ && cherenkovStatusProvenanceValid_;
-    cherenkovPressureValueAvailable_ =
-        cherenkovPressureRecorded_ && cherenkovPressureProvenanceValid_;
-    // pdhd_beamevent is the only IFBeam access in this job. Do not label its
-    // values as IFBeam records until FHiCL certifies the PDHD channel mapping
-    // and the producer supplied detector timestamps for both Cherenkovs.
-    ckov0IfbeamTimestampRaw_ = h->front().GetCKov0Time();
-    ckov1IfbeamTimestampRaw_ = h->front().GetCKov1Time();
-    ifbeamCkov0RecordFound_ =
-        isData_ && beamEventProducedInCurrentJob_ &&
-        ifbeamCherenkovProvenanceValid_ && std::isfinite(ckov0Pressure_) &&
-        std::isfinite(ckov0IfbeamTimestampRaw_) &&
-        ckov0IfbeamTimestampRaw_ > 0.;
-    ifbeamCkov1RecordFound_ =
-        isData_ && beamEventProducedInCurrentJob_ &&
-        ifbeamCherenkovProvenanceValid_ && std::isfinite(ckov1Pressure_) &&
-        std::isfinite(ckov1IfbeamTimestampRaw_) &&
-        ckov1IfbeamTimestampRaw_ > 0.;
-    ifbeamCkovRecordFound_ =
-        ifbeamCkov0RecordFound_ && ifbeamCkov1RecordFound_;
-    if (ifbeamCkov0RecordFound_) {
-      ckov0PressureIfbeam_ = ckov0Pressure_;
-    }
-    if (ifbeamCkov1RecordFound_) {
-      ckov1PressureIfbeam_ = ckov1Pressure_;
-    }
-    monitorNames_ = r.monitorNames;
-    monitorAvailable_ = r.monitorAvailable;
-    activeFiberCounts_ = r.activeFiberCounts;
-    fiberTimestampRaw_ = r.fiberTimestampRaw;
-    // IDs for monitor i occupy [offset[i], offset[i + 1]) in the flat branch.
-    activeFiberOffsets_.push_back(0U);
-    glitchFiberOffsets_.push_back(0U);
-    for (std::size_t index = 0; index < r.monitorNames.size(); ++index) {
-      if (index < r.activeFiberIds.size()) {
-        activeFiberIdsFlat_.insert(activeFiberIdsFlat_.end(),
-                                   r.activeFiberIds[index].begin(),
-                                   r.activeFiberIds[index].end());
+    // Multiple beam events are ambiguous, so detailed fields are not selected.
+    exactlyOneBeamEvent_ = beamEventHandle->size() == 1;
+    if (!exactlyOneBeamEvent_) {
+      if (eventMessagesEmitted_ < maxEventMessages_) {
+        mf::LogWarning("PDHDBeamInstrumentation")
+            << "Expected exactly one beam event for run " << run_
+            << ", subrun " << subrun_ << ", event " << event_
+            << " from tag '" << selectedBeamEventTag.encode()
+            << "', but found " << beamEventCount_
+            << ". Detailed fields remain unset and the event row is retained.";
+        ++eventMessagesEmitted_;
       }
-      activeFiberOffsets_.push_back(
-          static_cast<unsigned int>(activeFiberIdsFlat_.size()));
-      if (index < r.glitchFiberIndices.size()) {
-        glitchFiberIndicesFlat_.insert(glitchFiberIndicesFlat_.end(),
-                                       r.glitchFiberIndices[index].begin(),
-                                       r.glitchFiberIndices[index].end());
+    } else {
+      ++uniqueBeamEventEvents_;
+      try {
+        // Official utilities define trigger quality, momentum quality, and PID.
+        auto const referenceSource =
+            isData_ ? BeamReferenceSource::DataInstrumentation
+                    : BeamReferenceSource::SimulatedInstrumentation;
+        auto const evaluatePid = isData_ ? evaluateDataPid_ : evaluateMcPid_;
+        pidMethod_ = evaluatePid ? "ProtoDUNEBeamlineUtils::GetPID"
+                                 : "not_evaluated";
+        auto const diagnostics = BeamInstrumentationAlg::Extract(
+            beamEventHandle->front(), beamline_, referenceSource,
+            nominalMomentum_, isData_ || evaluateMcTrigger_, evaluatePid,
+            monitors_);
+        extractionSource_ =
+            isData_ ? "data_instrumentation" : "simulated_instrumentation";
+        goodTrigger_ = diagnostics.goodTrigger;
+        triggerEvaluated_ = diagnostics.triggerEvaluated;
+        pidEvaluated_ = evaluatePid;
+        hasPerfectBeamMomentum_ = diagnostics.hasPerfectBeamMomentum;
+        timingTrigger_ = diagnostics.timingTrigger;
+        beamTrigger_ = diagnostics.beamTrigger;
+        triggersMatched_ = diagnostics.triggersMatched;
+        generalTriggerSeconds_ = diagnostics.generalTriggerSeconds;
+        generalTriggerNanoseconds_ = diagnostics.generalTriggerNanoseconds;
+        magnetCurrent_ = diagnostics.magnetCurrent;
+        momenta_ = diagnostics.momentaGeV;
+        tof_ = diagnostics.tofNs;
+        tofChannels_ = diagnostics.tofChannels;
+        pidCandidates_ = diagnostics.pidCandidates;
+        // Store the exact Cherenkov values seen by GetPID. Separate provenance
+        // flags identify whether they came from validated detector information.
+        ckov0_ = diagnostics.ckov0Status;
+        ckov1_ = diagnostics.ckov1Status;
+        ckov0Pressure_ = diagnostics.ckov0Pressure;
+        ckov1Pressure_ = diagnostics.ckov1Pressure;
+        cherenkovStatusRecorded_ = ckov0_ >= 0 && ckov1_ >= 0;
+        cherenkovPressureRecorded_ = std::isfinite(ckov0Pressure_) &&
+                                     std::isfinite(ckov1Pressure_);
+        // SkipLLT emits default-looking values when LLT information is absent.
+        // Keep those raw fields inspectable, but do not make them usable inputs
+        // to PID or analysis until the channel source has been validated.
+        cherenkovStatusValueAvailable_ =
+            cherenkovStatusRecorded_ && cherenkovStatusProvenanceValid_;
+        cherenkovPressureValueAvailable_ =
+            cherenkovPressureRecorded_ && cherenkovPressureProvenanceValid_;
+        // pdhd_beamevent is the only IFBeam access in this job. Do not label
+        // its values as IFBeam records until FHiCL certifies the PDHD channel
+        // mapping and the producer supplied detector timestamps for both
+        // Cherenkovs.
+        ckov0IfbeamTimestampRaw_ = beamEventHandle->front().GetCKov0Time();
+        ckov1IfbeamTimestampRaw_ = beamEventHandle->front().GetCKov1Time();
+        ifbeamCkov0RecordFound_ =
+            isData_ && beamEventProducedInCurrentJob_ &&
+            ifbeamCherenkovProvenanceValid_ && std::isfinite(ckov0Pressure_) &&
+            std::isfinite(ckov0IfbeamTimestampRaw_) &&
+            ckov0IfbeamTimestampRaw_ > 0.;
+        ifbeamCkov1RecordFound_ =
+            isData_ && beamEventProducedInCurrentJob_ &&
+            ifbeamCherenkovProvenanceValid_ && std::isfinite(ckov1Pressure_) &&
+            std::isfinite(ckov1IfbeamTimestampRaw_) &&
+            ckov1IfbeamTimestampRaw_ > 0.;
+        ifbeamCkovRecordFound_ =
+            ifbeamCkov0RecordFound_ && ifbeamCkov1RecordFound_;
+        if (ifbeamCkov0RecordFound_) {
+          ckov0PressureIfbeam_ = ckov0Pressure_;
+        }
+        if (ifbeamCkov1RecordFound_) {
+          ckov1PressureIfbeam_ = ckov1Pressure_;
+        }
+        monitorNames_ = diagnostics.monitorNames;
+        monitorAvailable_ = diagnostics.monitorAvailable;
+        activeFiberCounts_ = diagnostics.activeFiberCounts;
+        fiberTimestampRaw_ = diagnostics.fiberTimestampRaw;
+        // IDs for monitor i occupy [offset[i], offset[i + 1]) in the flat
+        // branch.
+        activeFiberOffsets_.push_back(0U);
+        glitchFiberOffsets_.push_back(0U);
+        for (std::size_t index = 0; index < diagnostics.monitorNames.size();
+             ++index) {
+          if (index < diagnostics.activeFiberIds.size()) {
+            activeFiberIdsFlat_.insert(
+                activeFiberIdsFlat_.end(),
+                diagnostics.activeFiberIds[index].begin(),
+                diagnostics.activeFiberIds[index].end());
+          }
+          activeFiberOffsets_.push_back(
+              static_cast<unsigned int>(activeFiberIdsFlat_.size()));
+          if (index < diagnostics.glitchFiberIndices.size()) {
+            glitchFiberIndicesFlat_.insert(
+                glitchFiberIndicesFlat_.end(),
+                diagnostics.glitchFiberIndices[index].begin(),
+                diagnostics.glitchFiberIndices[index].end());
+          }
+          glitchFiberOffsets_.push_back(
+              static_cast<unsigned int>(glitchFiberIndicesFlat_.size()));
+        }
+        triggerEvaluatedEvents_ += triggerEvaluated_;
+        pidEvaluatedEvents_ += pidEvaluated_;
+        goodTriggerEvents_ += goodTrigger_;
+
+        if (eventMessagesEmitted_ < maxEventMessages_) {
+          mf::LogInfo("PDHDBeamInstrumentation")
+              << "Extracted " << extractionSource_ << " for run " << run_
+              << ", subrun " << subrun_ << ", event " << event_
+              << " from tag '" << selectedBeamEventTag.encode()
+              << "': tracks=" << diagnostics.tracks.size()
+              << ", momenta=" << momenta_.size() << ", TOFs=" << tof_.size()
+              << ", PID candidates=" << pidCandidates_.size()
+              << ", PID evaluated=" << pidEvaluated_
+              << ", trigger evaluated=" << triggerEvaluated_
+              << ", good trigger=" << goodTrigger_ << ".";
+          ++eventMessagesEmitted_;
+        }
+
+        // Write the complete human-readable inspection record before
+        // flattening tracks into tree vectors; no candidate is selected here.
+        printEventDetails(diagnostics);
+
+        // Parallel vectors preserve every beamline track without choosing one.
+        for (auto const &beamlineTrack : diagnostics.tracks) {
+          trackStartX_.push_back(beamlineTrack.start.x);
+          trackStartY_.push_back(beamlineTrack.start.y);
+          trackStartZ_.push_back(beamlineTrack.start.z);
+          trackEndX_.push_back(beamlineTrack.end.x);
+          trackEndY_.push_back(beamlineTrack.end.y);
+          trackEndZ_.push_back(beamlineTrack.end.z);
+          trackStartDirX_.push_back(beamlineTrack.startDirection.x);
+          trackStartDirY_.push_back(beamlineTrack.startDirection.y);
+          trackStartDirZ_.push_back(beamlineTrack.startDirection.z);
+          trackEndDirX_.push_back(beamlineTrack.endDirection.x);
+          trackEndDirY_.push_back(beamlineTrack.endDirection.y);
+          trackEndDirZ_.push_back(beamlineTrack.endDirection.z);
+        }
+      } catch (std::exception const &e) {
+        ++extractionErrorEvents_;
+        if (eventMessagesEmitted_ < maxEventMessages_) {
+          mf::LogWarning("PDHDBeamInstrumentation")
+              << "Beam extraction failed for run " << run_ << ", subrun "
+              << subrun_ << ", event " << event_ << " from tag '"
+              << selectedBeamEventTag.encode() << "': " << e.what();
+          ++eventMessagesEmitted_;
+        }
       }
-      glitchFiberOffsets_.push_back(
-          static_cast<unsigned int>(glitchFiberIndicesFlat_.size()));
-    }
-    triggerEvaluatedEvents_ += triggerEvaluated_;
-    pidEvaluatedEvents_ += pidEvaluated_;
-    goodTriggerEvents_ += goodTrigger_;
-
-    if (eventMessagesEmitted_ < maxEventMessages_) {
-      mf::LogInfo("PDHDBeamInstrumentation")
-          << "Extracted " << source_ << " for run " << run_ << ", subrun "
-          << subrun_ << ", event " << event_ << " from tag '" << tag.encode()
-          << "': tracks=" << r.tracks.size() << ", momenta=" << momenta_.size()
-          << ", TOFs=" << tof_.size()
-          << ", PID candidates=" << pidCandidates_.size()
-          << ", PID evaluated=" << pidEvaluated_
-          << ", trigger evaluated=" << triggerEvaluated_
-          << ", good trigger=" << goodTrigger_ << ".";
-      ++eventMessagesEmitted_;
-    }
-
-    // Write the complete human-readable inspection record before flattening
-    // tracks into tree vectors; no candidate or track is selected here.
-    printEventDetails(r);
-
-    // Parallel vectors preserve every beamline track without choosing one.
-    for (auto const &t : r.tracks) {
-      trackStartX_.push_back(t.start.x);
-      trackStartY_.push_back(t.start.y);
-      trackStartZ_.push_back(t.start.z);
-      trackEndX_.push_back(t.end.x);
-      trackEndY_.push_back(t.end.y);
-      trackEndZ_.push_back(t.end.z);
-      trackStartDirX_.push_back(t.startDirection.x);
-      trackStartDirY_.push_back(t.startDirection.y);
-      trackStartDirZ_.push_back(t.startDirection.z);
-      trackEndDirX_.push_back(t.endDirection.x);
-      trackEndDirY_.push_back(t.endDirection.y);
-      trackEndDirZ_.push_back(t.endDirection.z);
-    }
-  } catch (std::exception const &e) {
-    ++extractionErrorEvents_;
-    if (eventMessagesEmitted_ < maxEventMessages_) {
-      mf::LogWarning("PDHDBeamInstrumentation")
-          << "Beam extraction failed for run " << run_ << ", subrun " << subrun_
-          << ", event " << event_ << " from tag '" << tag.encode()
-          << "': " << e.what();
-      ++eventMessagesEmitted_;
     }
   }
   tree_->Fill();

@@ -1,5 +1,6 @@
-# Only the two populated beam analyzers are registered. Other source files
-# remain documented templates and are not discovered implicitly.
+# Only the two implemented beam analyzers are compiled and registered. The
+# remaining source files are template-only contracts and are not discovered
+# implicitly.
 set(BEAM_MODULE_LIBRARIES
   dune_PDHDAnalysisDiagnosticsAlg
   ProtoDUNEUtilities

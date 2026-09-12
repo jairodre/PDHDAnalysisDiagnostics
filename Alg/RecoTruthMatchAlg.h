@@ -27,12 +27,17 @@ struct TruthMatch {
   double sharedEvidence = 0.;
   double purity = 0.;
   double completeness = 0.;
-  std::size_t sharedHits = 0, sharedDeltaRayHits = 0;
-  bool purityValid = false, completenessValid = false;
+  std::size_t sharedHits = 0;
+  std::size_t sharedDeltaRayHits = 0;
+  // Ratios remain zero unless their own validity flag is true.
+  bool purityValid = false;
+  bool completenessValid = false;
 };
 struct TruthMatchResult {
   std::vector<TruthMatch> matches;
-  bool valid = false, ambiguousBest = false;
+  bool valid = false;
+  // True when the two leading evidence values differ by no more than tolerance.
+  bool ambiguousBest = false;
   MatchEvidence evidence = MatchEvidence::HitCount;
   std::string source;
 };

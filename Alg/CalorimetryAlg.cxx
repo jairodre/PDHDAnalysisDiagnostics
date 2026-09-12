@@ -11,82 +11,94 @@
 #include <cmath>
 #include <utility>
 namespace pdhd::diagnostics {
-CalorimetryResult CalorimetryAlg::Extract(anab::Calorimetry const &c,
+CalorimetryResult CalorimetryAlg::Extract(anab::Calorimetry const &calorimetry,
                                           CalorimetryVariant variant,
                                           bool calibrated, std::string producer,
                                           std::string dQdxUnits) {
-  CalorimetryResult r;
-  auto const &dedx = c.dEdx();
-  auto const &dqdx = c.dQdx();
-  auto const &rr = c.ResidualRange();
-  auto const &pitch = c.TrkPitchVec();
-  auto const &xyz = c.XYZ();
-  auto const &tp = c.TpIndices();
-  auto const &ef = c.Efield();
-  auto const &phi = c.Phi();
-  std::size_t const n =
-      std::max({dedx.size(), dqdx.size(), rr.size(), pitch.size(), xyz.size(),
-                tp.size(), ef.size(), phi.size()});
-  r.points.reserve(n);
-  for (std::size_t i = 0; i < n; ++i) {
-    CalorimetryPoint p;
-    p.pointIndex = i;
-    if (i < dedx.size() && std::isfinite(dedx[i])) {
-      p.dEdxValid = true;
-      p.dEdxMeVPerCm = dedx[i];
+  CalorimetryResult result;
+  auto const &dEdxValues = calorimetry.dEdx();
+  auto const &dQdxValues = calorimetry.dQdx();
+  auto const &residualRanges = calorimetry.ResidualRange();
+  auto const &trackPitches = calorimetry.TrkPitchVec();
+  auto const &positions = calorimetry.XYZ();
+  auto const &trajectoryPointIndices = calorimetry.TpIndices();
+  auto const &electricFields = calorimetry.Efield();
+  auto const &phiValues = calorimetry.Phi();
+  std::size_t const pointCount = std::max(
+      {dEdxValues.size(), dQdxValues.size(), residualRanges.size(),
+       trackPitches.size(), positions.size(), trajectoryPointIndices.size(),
+       electricFields.size(), phiValues.size()});
+
+  result.points.reserve(pointCount);
+  for (std::size_t pointIndex = 0; pointIndex < pointCount; ++pointIndex) {
+    CalorimetryPoint point;
+    point.pointIndex = pointIndex;
+    if (pointIndex < dEdxValues.size() &&
+        std::isfinite(dEdxValues[pointIndex])) {
+      point.dEdxValid = true;
+      point.dEdxMeVPerCm = dEdxValues[pointIndex];
     }
-    if (i < dqdx.size() && std::isfinite(dqdx[i])) {
-      p.dQdxValid = true;
-      p.dQdx = dqdx[i];
+    if (pointIndex < dQdxValues.size() &&
+        std::isfinite(dQdxValues[pointIndex])) {
+      point.dQdxValid = true;
+      point.dQdx = dQdxValues[pointIndex];
     }
-    if (i < rr.size() && std::isfinite(rr[i])) {
-      p.residualRangeValid = true;
-      p.residualRangeCm = rr[i];
+    if (pointIndex < residualRanges.size() &&
+        std::isfinite(residualRanges[pointIndex])) {
+      point.residualRangeValid = true;
+      point.residualRangeCm = residualRanges[pointIndex];
     }
-    if (i < pitch.size() && std::isfinite(pitch[i]) && pitch[i] > 0.) {
-      p.pitchValid = true;
-      p.pitchCm = pitch[i];
-      r.summary.sumPitchCm += pitch[i];
-      r.summary.maximumPitchCm =
-          std::max(r.summary.maximumPitchCm, double(pitch[i]));
-    } else
-      ++r.summary.invalidPitchCount;
-    if (i < xyz.size() && std::isfinite(xyz[i].X()) &&
-        std::isfinite(xyz[i].Y()) && std::isfinite(xyz[i].Z())) {
-      p.positionValid = true;
-      p.xCm = xyz[i].X();
-      p.yCm = xyz[i].Y();
-      p.zCm = xyz[i].Z();
+    if (pointIndex < trackPitches.size() &&
+        std::isfinite(trackPitches[pointIndex]) &&
+        trackPitches[pointIndex] > 0.) {
+      point.pitchValid = true;
+      point.pitchCm = trackPitches[pointIndex];
+      result.summary.sumPitchCm += trackPitches[pointIndex];
+      result.summary.maximumPitchCm = std::max(
+          result.summary.maximumPitchCm, double(trackPitches[pointIndex]));
+    } else {
+      ++result.summary.invalidPitchCount;
     }
-    if (i < tp.size()) {
-      p.trajectoryPointIndexValid = true;
-      p.trajectoryPointIndex = tp[i];
+    if (pointIndex < positions.size() &&
+        std::isfinite(positions[pointIndex].X()) &&
+        std::isfinite(positions[pointIndex].Y()) &&
+        std::isfinite(positions[pointIndex].Z())) {
+      point.positionValid = true;
+      point.xCm = positions[pointIndex].X();
+      point.yCm = positions[pointIndex].Y();
+      point.zCm = positions[pointIndex].Z();
     }
-    if (i < ef.size() && std::isfinite(ef[i])) {
-      p.electricFieldValid = true;
-      p.electricField = ef[i];
+    if (pointIndex < trajectoryPointIndices.size()) {
+      point.trajectoryPointIndexValid = true;
+      point.trajectoryPointIndex = trajectoryPointIndices[pointIndex];
     }
-    if (i < phi.size() && std::isfinite(phi[i])) {
-      p.phiValid = true;
-      p.phiDegrees = phi[i];
+    if (pointIndex < electricFields.size() &&
+        std::isfinite(electricFields[pointIndex])) {
+      point.electricFieldValid = true;
+      point.electricField = electricFields[pointIndex];
     }
-    if (p.dEdxValid && p.dQdxValid && p.residualRangeValid && p.pitchValid &&
-        p.positionValid)
-      ++r.summary.completePointCount;
-    r.points.push_back(p);
+    if (pointIndex < phiValues.size() && std::isfinite(phiValues[pointIndex])) {
+      point.phiValid = true;
+      point.phiDegrees = phiValues[pointIndex];
+    }
+    if (point.dEdxValid && point.dQdxValid && point.residualRangeValid &&
+        point.pitchValid && point.positionValid) {
+      ++result.summary.completePointCount;
+    }
+    result.points.push_back(point);
   }
-  auto const plane = c.PlaneID();
-  r.summary.cryostat = plane.Cryostat;
-  r.summary.tpc = plane.TPC;
-  r.summary.plane = plane.Plane;
-  r.summary.kineticEnergyMeV = c.KineticEnergy();
-  r.summary.rangeCm = c.Range();
-  r.summary.pointCount = n;
-  r.summary.variant = variant;
-  r.summary.calibrated = calibrated;
-  r.summary.producer = std::move(producer);
-  r.summary.dQdxUnits = std::move(dQdxUnits);
-  r.summary.valid = plane.isValid && n > 0;
-  return r;
+  auto const planeId = calorimetry.PlaneID();
+  result.summary.cryostat = planeId.Cryostat;
+  result.summary.tpc = planeId.TPC;
+  result.summary.plane = planeId.Plane;
+  result.summary.kineticEnergyMeV = calorimetry.KineticEnergy();
+  result.summary.rangeCm = calorimetry.Range();
+  result.summary.pointCount = pointCount;
+  result.summary.variant = variant;
+  result.summary.calibrated = calibrated;
+  result.summary.producer = std::move(producer);
+  result.summary.dQdxUnits = std::move(dQdxUnits);
+  result.summary.valid = planeId.isValid && pointCount > 0;
+  return result;
 }
 } // namespace pdhd::diagnostics

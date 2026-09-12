@@ -1,5 +1,6 @@
-# MC-mode scaffold. This table only records intended mode; it does not schedule
-# a module. Truth and backtracking products must still be checked per event.
+# MC-mode scaffold for shared diagnostic configuration. It records only the
+# intended mode; scheduling is owned by the including job. Truth and
+# backtracking products must still be checked per event.
 
 #include "pdhd_analysis_diagnostics.fcl"
 

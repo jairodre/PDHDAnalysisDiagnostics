@@ -246,25 +246,47 @@ only.
 
 ### PDHDBeamSelectionStages
 
-Records trigger quality, beamline-track multiplicity, Pandora beam-slice PFPs,
-position/direction residuals, ambiguity, and every decision component. The same
-reconstructed logic runs on data and MC; truth is not read. The nominal
-candidate is a primary PFP in Pandora's `IsTestBeam` slice with exactly one
+Records trigger quality, beam-reference multiplicity, Pandora beam-slice PFPs,
+position/direction residuals, ambiguity, and every decision component. Data
+uses the reconstructed external `ProtoDUNEBeamEvent` beamline fit. MC uses a
+unique generated `MCTruth` primary (configured beam origin and `Process()==
+"primary"`) and a unique `largeant` `MCParticle` with the same PDG and initial
+energy within `MCTruthGeantEnergyToleranceGeV`. Generator and Geant TrackIDs
+are recorded separately because this production does not preserve one common
+TrackID across the two products. The
+nominal candidate is a primary PFP in Pandora's `IsTestBeam` slice with exactly one
 reconstructed representation: a track or a shower. A PFP associated with both,
 with multiple objects, or with neither is written as a diagnostic row but cannot
 pass; the code never chooses a preferred association.
 
 The common `reco_candidate_type` is `0=none`, `1=track`, `2=shower`, or
-`3=ambiguous`; `tpc_reference_method` is `0=unavailable`, `1=track local
-segment`, or `2=ShowerStart/Direction`. DeltaX and DeltaY are the common TPC
-reference point minus the fitted beamline-track end. For tracks, the direction
+`3=ambiguous`; `tpc_reference_method` is `0=unavailable`, `1=Track::Vertex`
+with a local entry direction, or `2=ShowerStart/Direction`. For tracks,
+DeltaX, DeltaY, DeltaZ, and `entrance_z_cm` use `Track::Vertex()`, matching
+the SP `TrackStart*` residual convention; showers use `ShowerStart()`. The
+separate `tpc_entry_*` fields retain the lower-Z track trajectory entry used
+only to form the local direction. On data the beam reference is the fitted external
+beamline end/direction; on MC it is the first transported Geant point in the
+configured `MCTruthReferenceMinimumZCm`--`MCTruthReferenceMaximumZCm` window.
+`beam_reference_source` identifies which was used. For tracks, the direction
 is the chord over the first configurable `TPCEntryDirectionLengthCm` (default
 5 cm) after lower-Z entry; for showers it is the reconstructed initial shower
 direction. A shower has no artificial sampled-track length, so that branch is
-NaN. These residuals are stored without SP `IsBeamlike` or inherited numerical
+NaN. `position_match_valid` permits position-window studies independently of a
+valid direction; `direction_match_valid` permits a cosine; `match_valid` is
+their strict conjunction. These residuals are stored without SP `IsBeamlike` or inherited numerical
 windows, so they can define a validated HD selection later. Metadata, slice,
 track, and shower cardinality branches distinguish missing associations from
-rejection. Validation: static inspection only; not compiled or run.
+rejection. Track rows additionally preserve the full valid `recob::Track`
+trajectory as ordered XYZ vectors and the fitted beamline-track start/end; the
+vectors are empty for showers rather than representing a synthetic trajectory.
+`reco_object_length_cm` is the native `recob::Track::Length()` or
+`recob::Shower::Length()` with `reco_object_length_valid`; it is an observable,
+not a selection condition. MC additionally stores the final finite point of
+the uniquely matched transported Geant beam trajectory as `truth_beam_end_*`.
+That endpoint supports the explicit study of beam particles that do not reach
+the declared Z comparison window.
+Validation: static inspection only; not compiled or run.
 
 Later analyses split the generic selected sample without changing its beam tag:
 
@@ -274,8 +296,27 @@ Later analyses split the generic selected sample without changing its beam tag:
 | Hadron track candidate | `is_selected_track` or `is_selected && reco_candidate_type==1` | dE/dx, range, chi2 PID, topology, and beam-instrument PID/TOF if wanted |
 | EM shower candidate | `is_selected_shower` or `is_selected && reco_candidate_type==2` | CNN EM/track/Michel scores, shower quality, calorimetric E/p, and topology |
 
+MC outputs `truth_beam_*` identity, generated momentum, Geant entry, and
+direction branches in both event and candidate trees. They are unavailable on
+data, with explicit validity flags and NaNs rather than artificial zeroes.
+`truth_beam_track_id` is the generated-primary ID and
+`truth_beam_geant_track_id` is its uniquely PDG/energy-matched transported
+counterpart; `truth_beam_geant_match_unique` documents that correspondence.
+Truth PDG is a validation label, never a reconstructed-candidate species cut.
+`trigger_stage_applied` is true only when the data trigger is required; MC has
+no synthetic trigger pass and instead exposes generated-primary and Geant
+reference validity through the named `truth_beam_*` fields.
 Beam-instrumentation TOF/PID is intentionally retained as an independent input;
 it does not choose the track versus shower representation in this module.
+
+`grid_scripts/gridsubtar_analysis/PlotPDHDBeamCandidates.C` provides
+`MakePDHDBeamStudy(dataFile, mcFile, outputRootFile)`. It writes a multipage
+PDF and ROOT histograms for data/MC event flow, beam reference position and
+direction, track length before/after the full named selection, linear and log
+beam--TPC residual overlays, and the MC truth-beam endpoint Z distribution.
+It deliberately does not claim the PDF's truth-background categories,
+stopping-muon range, or calibrated dE/dx plots: those require the separate
+reco--truth and calorimetry modules with validated associations/calibrations.
 
 ### PDHDCosmicSelectionStages
 

@@ -9,7 +9,8 @@
  * This provides lossless joins between modular trees and prevents each analyzer
  * from independently choosing a first associated object. No selection is applied.
  *
- * Status: structure-only; no art plugin is registered yet.
+ * Status: template-only contract; intentionally unbuilt, unscheduled, and
+ * without an art plugin registration.
  */
 
 // TODO: Define compact typed edge tables rather than opaque string-only edges.

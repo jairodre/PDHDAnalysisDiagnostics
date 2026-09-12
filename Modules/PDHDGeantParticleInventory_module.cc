@@ -10,7 +10,8 @@
  * clipped quantities. Ancestry traversal belongs in GeantHierarchyAlg so loops,
  * missing parents, and deterministic ordering have one implementation.
  *
- * Status: structure-only; MC-only and not registered as a plugin.
+ * Status: template-only contract; MC-only, intentionally unbuilt, unscheduled,
+ * and without an art plugin registration.
  */
 
 // TODO: Implement base facts before derived interaction classifications.

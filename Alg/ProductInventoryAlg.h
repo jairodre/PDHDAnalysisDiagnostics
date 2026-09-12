@@ -13,10 +13,16 @@ namespace pdhd::diagnostics {
 enum class ProductRequirement { Optional, Required };
 enum class ProductState { Present, MissingOptional, MissingRequired, Invalid };
 struct ProductObservation {
-  std::string logicalName, configuredInputTag, expectedType;
+  std::string logicalName;
+  std::string configuredInputTag;
+  std::string expectedType;
   bool handleValid = false;
   std::size_t collectionSize = 0;
-  std::string resolvedModule, resolvedInstance, resolvedProcess, failureReason;
+  std::string resolvedModule;
+  std::string resolvedInstance;
+  std::string resolvedProcess;
+  // Populated by the caller when a typed lookup fails.
+  std::string failureReason;
 };
 struct ProductStatus : ProductObservation {
   ProductRequirement requirement = ProductRequirement::Optional;

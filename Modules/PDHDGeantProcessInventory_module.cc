@@ -10,7 +10,8 @@
  * and must document their definitions rather than replacing process strings.
  * Cycles, absent mothers, and particles outside the active volume remain visible.
  *
- * Status: structure-only; MC-only and not registered as a plugin.
+ * Status: template-only contract; MC-only, intentionally unbuilt, unscheduled,
+ * and without an art plugin registration.
  */
 
 // TODO: Define whether trajectory transitions are available in current products.

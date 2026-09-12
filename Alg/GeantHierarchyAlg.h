@@ -14,8 +14,12 @@
 #include <vector>
 namespace pdhd::diagnostics {
 struct GeantParticleFact {
-  int trackId = 0, motherTrackId = 0, pdg = 0;
-  std::string process, endProcess;
+  int trackId = 0;
+  // Zero denotes an event-local primary particle.
+  int motherTrackId = 0;
+  int pdg = 0;
+  std::string process;
+  std::string endProcess;
 };
 enum class AncestryState {
   Complete,

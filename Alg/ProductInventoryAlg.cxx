@@ -5,20 +5,23 @@
 namespace pdhd::diagnostics {
 ProductStatus ProductInventoryAlg::Evaluate(ProductObservation observation,
                                             ProductRequirement requirement) {
-  ProductStatus r;
-  static_cast<ProductObservation &>(r) = std::move(observation);
-  r.requirement = requirement;
-  if (r.logicalName.empty() || r.configuredInputTag.empty() ||
-      r.expectedType.empty()) {
-    r.state = ProductState::Invalid;
-  } else if (r.handleValid) {
-    r.state = ProductState::Present;
-    r.usable = true;
+  ProductStatus status;
+  static_cast<ProductObservation &>(status) = std::move(observation);
+  status.requirement = requirement;
+
+  bool const configurationComplete = !status.logicalName.empty() &&
+                                     !status.configuredInputTag.empty() &&
+                                     !status.expectedType.empty();
+  if (!configurationComplete) {
+    status.state = ProductState::Invalid;
+  } else if (status.handleValid) {
+    status.state = ProductState::Present;
+    status.usable = true;
   } else {
-    r.state = requirement == ProductRequirement::Required
-                  ? ProductState::MissingRequired
-                  : ProductState::MissingOptional;
+    status.state = requirement == ProductRequirement::Required
+                       ? ProductState::MissingRequired
+                       : ProductState::MissingOptional;
   }
-  return r;
+  return status;
 }
 } // namespace pdhd::diagnostics

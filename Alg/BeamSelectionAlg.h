@@ -12,7 +12,9 @@
 #include <limits>
 namespace pdhd::diagnostics {
 struct Direction3D {
-  double x = 0., y = 0., z = 0.;
+  double x = 0.;
+  double y = 0.;
+  double z = 0.;
 };
 enum class BeamReferenceSource {
   Unavailable,
@@ -24,27 +26,39 @@ struct BeamMatchInput {
   bool beamReferenceValid = false;
   Point3D beamPositionAtReference;
   Direction3D beamDirection;
-  bool recoObjectValid = false;
+  // Position residuals and direction compatibility have independent validity.
+  // This allows an SP-style TrackStart window study for a short reco track.
+  bool recoStartValid = false;
   Point3D recoStart;
+  bool recoDirectionValid = false;
   Direction3D recoDirection;
   BeamReferenceSource referenceSource = BeamReferenceSource::Unavailable;
 };
 struct BeamMatchResult {
+  // Position residuals are defined without requiring a reconstructable local
+  // direction; `valid` remains the stricter all-observable compatibility flag.
+  bool positionValid = false;
+  bool directionValid = false;
   bool valid = false;
   // NaN is an unavailable observable, never a physically meaningful zero.
   double deltaXcm = std::numeric_limits<double>::quiet_NaN();
   double deltaYcm = std::numeric_limits<double>::quiet_NaN();
+  // Reconstructed start Z minus beamline fitted endpoint Z, not absolute Z.
+  double deltaZcm = std::numeric_limits<double>::quiet_NaN();
   double entranceZcm = std::numeric_limits<double>::quiet_NaN();
   double directionCosine = std::numeric_limits<double>::quiet_NaN();
   BeamReferenceSource referenceSource = BeamReferenceSource::Unavailable;
 };
 struct BeamSelectionInput {
-  bool goodBeamTrigger = false, exactlyOneBeamlineTrack = false;
+  bool goodBeamTrigger = false;
+  bool exactlyOneBeamlineTrack = false;
   // The nominal TPC seed is a primary PFP in Pandora's beam-tagged slice.
-  bool pandoraBeamSlicePrimary = false, hasUnambiguousRecoObject = false;
+  bool pandoraBeamSlicePrimary = false;
+  bool hasUnambiguousRecoObject = false;
 };
 struct BeamSelectionResult {
-  bool passesGoodBeamTrigger = false, passesBeamlineMultiplicity = false;
+  bool passesGoodBeamTrigger = false;
+  bool passesBeamlineMultiplicity = false;
   bool passesPandoraBeamSlicePrimary = false;
   bool passesUnambiguousRecoObject = false;
   bool selected = false;
@@ -53,7 +67,8 @@ class BeamSelectionAlg {
 public:
   // These evaluate named stages only; neither function ranks candidates.
   static BeamMatchResult EvaluateInstrumentationMatch(BeamMatchInput const &);
-  static BeamSelectionResult EvaluateCandidateStages(BeamSelectionInput const &);
+  static BeamSelectionResult
+  EvaluateCandidateStages(BeamSelectionInput const &);
 };
 } // namespace pdhd::diagnostics
 #endif

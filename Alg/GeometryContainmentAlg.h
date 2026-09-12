@@ -22,7 +22,12 @@ struct Point3D {
   double z = 0.;
 };
 struct AxisAlignedVolume {
-  double minX = 0., maxX = 0., minY = 0., maxY = 0., minZ = 0., maxZ = 0.;
+  double minX = 0.;
+  double maxX = 0.;
+  double minY = 0.;
+  double maxY = 0.;
+  double minZ = 0.;
+  double maxZ = 0.;
   bool IsValid() const noexcept;
 };
 struct ContainmentResult {

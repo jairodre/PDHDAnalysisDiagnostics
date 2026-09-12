@@ -10,7 +10,8 @@
  * separate policies. This module must never infer a physical zero from a
  * missing product and should be implemented before all object inventories.
  *
- * Status: structure-only; no art plugin is registered yet.
+ * Status: template-only contract; intentionally unbuilt, unscheduled, and
+ * without an art plugin registration.
  */
 
 // TODO: Implement EDAnalyzer after the common event key, status enumeration,

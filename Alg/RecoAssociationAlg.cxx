@@ -5,18 +5,20 @@
 namespace pdhd::diagnostics {
 AssociationSummary RecoAssociationAlg::Summarize(std::size_t count, bool valid,
                                                  std::string source) {
-  AssociationSummary r;
-  r.count = count;
-  r.associationProductValid = valid;
-  r.source = std::move(source);
-  if (!valid)
-    r.cardinality = AssociationCardinality::Invalid;
-  else if (count == 0)
-    r.cardinality = AssociationCardinality::None;
-  else if (count == 1)
-    r.cardinality = AssociationCardinality::Unique;
-  else
-    r.cardinality = AssociationCardinality::Ambiguous;
-  return r;
+  AssociationSummary summary;
+  summary.count = count;
+  summary.associationProductValid = valid;
+  summary.source = std::move(source);
+
+  if (!valid) {
+    summary.cardinality = AssociationCardinality::Invalid;
+  } else if (count == 0) {
+    summary.cardinality = AssociationCardinality::None;
+  } else if (count == 1) {
+    summary.cardinality = AssociationCardinality::Unique;
+  } else {
+    summary.cardinality = AssociationCardinality::Ambiguous;
+  }
+  return summary;
 }
 } // namespace pdhd::diagnostics

@@ -1,4 +1,5 @@
-# Header-only records shared by the diagnostic analyzers. No dictionary is
-# required until a module begins producing persistent art data products.
+# Header-only placeholder for records shared by diagnostic analyzers. No
+# dictionary is required until an implemented module produces persistent art
+# data products.
 install_headers()
 install_source()

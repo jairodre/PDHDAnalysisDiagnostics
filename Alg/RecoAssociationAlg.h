@@ -19,8 +19,11 @@ struct AssociationSummary {
   std::string source;
 };
 struct RecoAssociationEdge {
-  std::size_t sourceIndex = 0, targetIndex = 0;
-  std::string sourceCollection, targetCollection, associationType;
+  std::size_t sourceIndex = 0;
+  std::size_t targetIndex = 0;
+  std::string sourceCollection;
+  std::string targetCollection;
+  std::string associationType;
 };
 class RecoAssociationAlg {
 public:
