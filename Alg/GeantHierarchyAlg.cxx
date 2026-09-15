@@ -11,6 +11,8 @@ GeantHierarchyAlg::Build(std::vector<GeantParticleFact> const &input) {
     bool const inserted =
         hierarchy.particles.emplace(particle.trackId, particle).second;
     if (!inserted) {
+      // Keep the first fact deterministic, but mark the ID so consumers never
+      // mistake the retained map entry for an unambiguous particle.
       hierarchy.duplicateTrackIds.push_back(particle.trackId);
     }
   }

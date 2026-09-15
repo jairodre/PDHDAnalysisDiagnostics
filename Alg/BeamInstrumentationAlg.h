@@ -20,13 +20,17 @@ class ProtoDUNEBeamlineUtils;
 }
 namespace pdhd::diagnostics {
 struct BeamTrackRecord {
-  // Beamline-extrapolated endpoints are in cm; directions are unitless.
+  // One reconstructed beamline trajectory. Endpoints are in cm; directions
+  // are unitless. Extraction retains every track and does not choose one.
   Point3D start;
   Point3D end;
   Direction3D startDirection;
   Direction3D endDirection;
 };
 struct BeamInstrumentationRecord {
+  // Event-local BeamEvent content, tagged with the measured or simulated
+  // product used by the caller. `valid` means Extract received that event;
+  // it does not certify any trigger, PID, or track-multiplicity requirement.
   // Trigger/PID booleans are meaningful only when their evaluated flag is set.
   bool valid = false;
   bool goodTrigger = false;
@@ -66,6 +70,9 @@ struct BeamInstrumentationRecord {
 };
 class BeamInstrumentationAlg {
 public:
+  // Copies the supplied BeamEvent into a provenance-carrying record. Trigger
+  // and PID utilities run only when requested; otherwise their result vectors
+  // remain at their defaults. `nominalMomentumGeV` is passed to GetPID only.
   static BeamInstrumentationRecord
   Extract(beam::ProtoDUNEBeamEvent const &, protoana::ProtoDUNEBeamlineUtils &,
           BeamReferenceSource, double nominalMomentumGeV, bool evaluateTrigger,

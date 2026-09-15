@@ -30,6 +30,8 @@ BeamSelectionAlg::EvaluateInstrumentationMatch(BeamMatchInput const &in) {
   result.deltaYcm = in.recoStart.y - in.beamPositionAtReference.y;
   result.deltaZcm = in.recoStart.z - in.beamPositionAtReference.z;
   result.entranceZcm = in.recoStart.z;
+  // Direction is supplementary diagnostic information: a missing direction
+  // never invalidates the already computed position residuals.
   result.directionValid =
       in.recoDirectionValid &&
       Normalize(in.beamDirection, normalizedBeamDirection) &&

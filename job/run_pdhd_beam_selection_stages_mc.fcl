@@ -5,6 +5,7 @@
 # PDG labels output rows but never apply a species cut to a reconstructed PFP.
 
 #include "messageservice.fcl"
+#include "services_dune.fcl"
 #include "pdhd_analysis_diagnostics_mc.fcl"
 
 process_name: PDHDBeamSelectionStagesMC
@@ -12,7 +13,19 @@ process_name: PDHDBeamSelectionStagesMC
 services: {
   TFileService: { fileName: "pdhd_beam_selection_stages_mc.root" }
   message: @local::standard_info
+  # BackTrackerService requires WireReadout; use the same PDHD v6 geometry
+  # convention as the corresponding reconstructed MC configurations.
+  WireReadout: @local::dune_wire_readout
+  Geometry: @local::protodunehdv6_geo
+  # Follow the standard PDHD MC reconstruction service configuration. The
+  # input inventory establishes these exact G4 and SimChannel labels.
+  DetectorClocksService: @local::protodunehd_detectorclocks
+  BackTrackerService: @local::pdsp_backtrackerservice
+  ParticleInventoryService: @local::dunefd_particleinventoryservice
 }
+
+services.BackTrackerService.BackTracker.G4ModuleLabel: "largeant"
+services.BackTrackerService.BackTracker.SimChannelModuleLabel: "tpcrawdecoder:simpleSC"
 
 source: {
   module_type: RootInput
@@ -31,9 +44,17 @@ physics: {
 
 # MC comparison reference: first Geant point in this explicit PDHD Z window.
 # Override these tags only after checking the input ART product inventory.
+physics.analyzers.beamSelectionStages.MCBeamTag: "generator"
 physics.analyzers.beamSelectionStages.MCTruthTag: "generator"
 physics.analyzers.beamSelectionStages.MCParticleTag: "largeant"
 physics.analyzers.beamSelectionStages.MCTruthBeamOrigin: 4
+# MCTruth origin code for cosmic-ray backgrounds in the standard simb scheme.
+physics.analyzers.beamSelectionStages.MCCosmicOrigin: 2
 physics.analyzers.beamSelectionStages.MCTruthGeantEnergyToleranceGeV: 1.e-5
 physics.analyzers.beamSelectionStages.MCTruthReferenceMinimumZCm: 0.0
 physics.analyzers.beamSelectionStages.MCTruthReferenceMaximumZCm: 600.0
+# MC diagnostic only: use ProtoDUNETruthUtils for selected-track energy-ranked
+# and hit-ranked matches plus hit-count purity/completeness.
+# These branches never enter is_selected.
+physics.analyzers.beamSelectionStages.EnableMCTrackTruthMatching: true
+physics.analyzers.beamSelectionStages.TruthHitTag: "gaushit"

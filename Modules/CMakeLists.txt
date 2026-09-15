@@ -7,6 +7,7 @@ set(BEAM_MODULE_LIBRARIES
   dunecore::DuneObj
   nusimdata::SimulationBase
   lardataobj::RecoBase
+  larsim::MCCheater_ParticleInventoryService_service
   art::Framework_Core
   art::Framework_Principal
   art::Framework_Services_Registry

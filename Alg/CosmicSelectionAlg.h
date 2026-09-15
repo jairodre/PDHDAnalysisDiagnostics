@@ -8,6 +8,7 @@
 #include "protoduneana/PDHDAnalysisDiagnostics/Alg/GeometryContainmentAlg.h"
 namespace pdhd::diagnostics {
 struct CosmicSelectionConfig {
+  // Explicit optional gates. Threshold semantics belong only to enabled gates.
   bool requireClearCosmic = false;
   bool requireBdt = false;
   bool requireStartContained = false;
@@ -17,6 +18,7 @@ struct CosmicSelectionConfig {
   double minimumCosmicBdtScore = 0.;
 };
 struct CosmicSelectionInput {
+  // Reconstructed classifier and containment facts supplied by the caller.
   // Invalid classifier inputs fail only when their corresponding cut is used.
   bool clearCosmicValid = false;
   bool isClearCosmic = false;
@@ -36,6 +38,8 @@ struct CosmicSelectionResult {
 };
 class CosmicSelectionAlg {
 public:
+  // Applies enabled gates as an AND. Invalid input fails an enabled classifier
+  // or containment gate, while a disabled gate passes by construction.
   static CosmicSelectionResult Select(CosmicSelectionInput const &,
                                       CosmicSelectionConfig const &);
 };

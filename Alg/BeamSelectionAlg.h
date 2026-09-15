@@ -17,12 +17,15 @@ struct Direction3D {
   double z = 0.;
 };
 enum class BeamReferenceSource {
+  // Identifies the fitted/derived reference supplied by the caller; it does
+  // not change the residual calculation.
   Unavailable,
   DataInstrumentation,
   SimulatedInstrumentation,
   TruthProjection
 };
 struct BeamMatchInput {
+  // Inputs for diagnostic TPC-start versus beam-reference comparison.
   bool beamReferenceValid = false;
   Point3D beamPositionAtReference;
   Direction3D beamDirection;
@@ -35,6 +38,7 @@ struct BeamMatchInput {
   BeamReferenceSource referenceSource = BeamReferenceSource::Unavailable;
 };
 struct BeamMatchResult {
+  // Derived diagnostic observables. No field here is a numerical cut result.
   // Position residuals are defined without requiring a reconstructable local
   // direction; `valid` remains the stricter all-observable compatibility flag.
   bool positionValid = false;
@@ -50,6 +54,7 @@ struct BeamMatchResult {
   BeamReferenceSource referenceSource = BeamReferenceSource::Unavailable;
 };
 struct BeamSelectionInput {
+  // Boolean facts already established by the module for one reco candidate.
   bool goodBeamTrigger = false;
   bool exactlyOneBeamlineTrack = false;
   // The nominal TPC seed is a primary PFP in Pandora's beam-tagged slice.
@@ -57,6 +62,7 @@ struct BeamSelectionInput {
   bool hasUnambiguousRecoObject = false;
 };
 struct BeamSelectionResult {
+  // Named conjunction stages; `selected` is their AND, not a beam-match cut.
   bool passesGoodBeamTrigger = false;
   bool passesBeamlineMultiplicity = false;
   bool passesPandoraBeamSlicePrimary = false;
@@ -65,8 +71,11 @@ struct BeamSelectionResult {
 };
 class BeamSelectionAlg {
 public:
-  // These evaluate named stages only; neither function ranks candidates.
+  // Computes cm residuals and a unit-vector cosine when their independently
+  // required inputs are valid. It applies no position or direction threshold.
   static BeamMatchResult EvaluateInstrumentationMatch(BeamMatchInput const &);
+  // Copies four caller-established stage facts and returns their conjunction;
+  // neither function ranks candidates.
   static BeamSelectionResult
   EvaluateCandidateStages(BeamSelectionInput const &);
 };

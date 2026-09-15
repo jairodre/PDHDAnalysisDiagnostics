@@ -285,7 +285,20 @@ vectors are empty for showers rather than representing a synthetic trajectory.
 not a selection condition. MC additionally stores the final finite point of
 the uniquely matched transported Geant beam trajectory as `truth_beam_end_*`.
 That endpoint supports the explicit study of beam particles that do not reach
-the declared Z comparison window.
+the declared Z comparison window. For the selected track only, MC fills the
+established `reco_truth_energy_*` branches with
+`ProtoDUNETruthUtils::GetMCParticleFromRecoTrack` and the established
+`reco_truth_hit_*` branches with `GetMCParticleByHits`; neither affects
+`is_selected`. `reco_truth_purity` and `reco_truth_completeness` are the
+utility's hit-count metrics. `TruthHitTag` explicitly names the global
+reconstructed-hit collection used by completeness.
+
+`ProtoDUNETruthUtils::GetMCParticleFromRecoTrack` fills the energy-ranked
+`reco_truth_utility_*` result. `GetMCParticleByHits` fills the hit-ranked
+`reco_truth_hit_*` result and its `reco_truth_hit_shared_*` counters.
+`GetPurity` and `GetCompleteness` provide the hit-count metrics. These are the
+only track-truth implementations in this module, and none modifies
+`is_selected`.
 Validation: static inspection only; not compiled or run.
 
 Later analyses split the generic selected sample without changing its beam tag:

@@ -13,6 +13,7 @@ namespace pdhd::diagnostics {
 enum class ProductRequirement { Optional, Required };
 enum class ProductState { Present, MissingOptional, MissingRequired, Invalid };
 struct ProductObservation {
+  // Typed lookup facts collected by a module for one configured product.
   std::string logicalName;
   std::string configuredInputTag;
   std::string expectedType;
@@ -25,12 +26,16 @@ struct ProductObservation {
   std::string failureReason;
 };
 struct ProductStatus : ProductObservation {
+  // Classification preserves the original lookup/provenance fields. `usable`
+  // is true only for a valid handle with complete configuration metadata.
   ProductRequirement requirement = ProductRequirement::Optional;
   ProductState state = ProductState::Invalid;
   bool usable = false;
 };
 class ProductInventoryAlg {
 public:
+  // Converts a caller-observed typed lookup into required/optional status;
+  // this does not search the event or retry a failed lookup.
   static ProductStatus Evaluate(ProductObservation, ProductRequirement);
 };
 } // namespace pdhd::diagnostics

@@ -16,6 +16,8 @@ class Calorimetry;
 namespace pdhd::diagnostics {
 enum class CalorimetryVariant { Unknown, SCE, NoSCE };
 struct CalorimetryPoint {
+  // One output row indexed over the largest source-vector length. A false
+  // validity flag distinguishes a missing/nonfinite source value from zero.
   std::size_t pointIndex = 0;
   // Valid only when the corresponding Calorimetry vector had this element.
   std::size_t trajectoryPointIndex = 0;
@@ -41,6 +43,7 @@ struct CalorimetryPoint {
   double phiDegrees = 0.;
 };
 struct CalorimetrySummary {
+  // Per-anab::Calorimetry metadata and counts; it does not recalibrate inputs.
   bool valid = false;
   unsigned int cryostat = 0;
   unsigned int tpc = 0;
@@ -63,6 +66,8 @@ struct CalorimetryResult {
 };
 class CalorimetryAlg {
 public:
+  // Bounds-checks each independently sized Calorimetry vector. Caller-provided
+  // variant, calibration, producer, and dQ/dx units preserve provenance.
   static CalorimetryResult Extract(anab::Calorimetry const &,
                                    CalorimetryVariant, bool calibrated,
                                    std::string producer, std::string dQdxUnits);

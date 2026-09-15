@@ -14,6 +14,7 @@
 namespace pdhd::diagnostics {
 enum class MatchEvidence { HitCount, Charge, Energy };
 struct TruthContribution {
+  // Caller-supplied overlap totals in the declared MatchEvidence convention.
   int truthTrackId = 0;
   double sharedEvidence = 0.;
   double recoTotalEvidence = 0.;
@@ -22,6 +23,7 @@ struct TruthContribution {
   std::size_t sharedDeltaRayHits = 0;
 };
 struct TruthMatch {
+  // One valid non-negative contribution, ordered by evidence in the result.
   int truthTrackId = 0;
   unsigned int rank = 0;
   double sharedEvidence = 0.;
@@ -34,6 +36,7 @@ struct TruthMatch {
   bool completenessValid = false;
 };
 struct TruthMatchResult {
+  // Source and evidence make the numerical ranking interpretable downstream.
   std::vector<TruthMatch> matches;
   bool valid = false;
   // True when the two leading evidence values differ by no more than tolerance.
@@ -43,6 +46,9 @@ struct TruthMatchResult {
 };
 class RecoTruthMatchAlg {
 public:
+  // Drops invalid/negative shared evidence, ranks surviving contributions by
+  // descending evidence (track ID breaks exact ties), and computes ratios only
+  // from positive finite denominators.
   static TruthMatchResult Rank(std::vector<TruthContribution> const &,
                                MatchEvidence, std::string source,
                                double tieTolerance = 1.e-12);

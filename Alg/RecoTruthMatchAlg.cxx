@@ -17,6 +17,8 @@ RecoTruthMatchAlg::Rank(std::vector<TruthContribution> const &input,
     return result;
   }
   for (auto const &c : input) {
+    // Invalid evidence is absent from the ranking, not converted to a
+    // zero-evidence match that could look physically meaningful.
     if (!std::isfinite(c.sharedEvidence) || c.sharedEvidence < 0.)
       continue;
     TruthMatch m;

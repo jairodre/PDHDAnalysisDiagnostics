@@ -29,6 +29,8 @@ CalorimetryResult CalorimetryAlg::Extract(anab::Calorimetry const &calorimetry,
        trackPitches.size(), positions.size(), trajectoryPointIndices.size(),
        electricFields.size(), phiValues.size()});
 
+  // Preserve all available per-point evidence rather than truncating to the
+  // shortest vector; field validity records the ragged-vector boundary.
   result.points.reserve(pointCount);
   for (std::size_t pointIndex = 0; pointIndex < pointCount; ++pointIndex) {
     CalorimetryPoint point;

@@ -64,6 +64,7 @@ ContainmentResult GeometryContainmentAlg::Evaluate(
   result.hasContainedSample = std::any_of(
       trajectory.begin(), trajectory.end(),
       [&](Point3D const &point) { return Contains(volume, point, marginCm); });
+  // Empty trajectories have no sampled evidence for full containment.
   result.allSampledPointsContained =
       !trajectory.empty() &&
       std::all_of(trajectory.begin(), trajectory.end(),

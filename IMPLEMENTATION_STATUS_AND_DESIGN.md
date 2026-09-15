@@ -36,3 +36,28 @@ behavior, and data/MC contract have been reviewed.
 
 See `DIAGNOSTICS_CATALOG.md` for the responsibility and implementation contract
 of every planned analyzer.
+
+## Reading the implemented beam selection
+
+Start with `PDHDBeamSelectionStages_module.cc`, which follows one event in six
+ordered phases: acquire the data/MC beam reference; obtain reconstructed
+products and associations; identify the single Pandora beam-tagged slice; build
+one candidate record per primary PFParticle; turn candidate passes into the
+event-level unique selection; and write all candidate rows plus one event row.
+The local `Candidate` record is intentionally transient: it stores values and
+collection indices only, is copied to the module-owned ROOT buffer while rows
+are written, and never owns ART-product pointers.
+
+`BeamSelectionAlg` contains the two short reusable decisions used by that
+module. `EvaluateInstrumentationMatch` calculates diagnostic position and
+direction observables but applies no numerical residual cut.
+`EvaluateCandidateStages` joins the four named candidate gates: trigger, unique
+beam reference, Pandora beam-slice primary, and one unambiguous reconstructed
+object. The module then additionally requires a unique beam event and exactly
+one passing primary before assigning `is_selected`.
+
+For data, the reference is the fitted beam-instrumentation track. For MC, the
+nominal reference is the transported Geant beam entry, while the stored
+generator `ProtoDUNEBeamEvent` is saved only as a separately labelled simulated
+instrumentation diagnostic. This separation prevents a diagnostic alternative
+from silently changing the nominal MC selection or beam--TPC residuals.

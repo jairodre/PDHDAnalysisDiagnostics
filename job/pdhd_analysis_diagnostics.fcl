@@ -77,6 +77,9 @@ pdhd_beam_selection_stages: {
   PFParticleMetadataTag: "pandora"
   PFParticleSliceTag: "pandora"
   TrackTag: "pandoraTrack"
+  # Explicit global reconstructed-hit source for selected-track MC
+  # completeness; the selected track's own hits come from TrackTag.
+  TruthHitTag: "gaushit"
   ShowerTag: "pandoraShower"
   # Passed to BeamInstrumentationAlg only. These observables are recorded for
   # per-track display labels and never define a candidate cut or beam--TPC
@@ -92,6 +95,10 @@ pdhd_beam_selection_stages: {
   # endpoint/entry residuals below are stored for a later HD-specific cut.
   # Tracks use a local lower-Z-entry chord; showers use ShowerStart/Direction.
   TPCEntryDirectionLengthCm: 5.0
+  # MC-only backtracking labels are disabled in the common table so a data
+  # job never requests truth services. The MC runnable FHiCL enables them and
+  # declares their G4/SimChannel provenance explicitly.
+  EnableMCTrackTruthMatching: false
   # Also print endJob counters to stdout when LogInfo categories are filtered.
   PrintSummaryToStdout: true
   # Bound per-event messages; endJob always reports complete counters.

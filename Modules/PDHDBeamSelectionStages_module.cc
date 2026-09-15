@@ -5,9 +5,10 @@
  *
  * Data reads the reconstructed external beamline from DataBeamTag. MC reads
  * the generated beam primary from MCTruthTag and its Geant trajectory from
- * MCParticleTag. The nominal decision requires the corresponding unique beam
- * reference, a Pandora beam-slice primary, and one unambiguous reconstructed
- * track or shower.
+ * MCParticleTag; a stored MCBeamTag is retained separately for simulated
+ * instrumentation diagnostics. The nominal decision requires the
+ * corresponding unique beam reference, a Pandora beam-slice primary, and one
+ * unambiguous reconstructed track or shower.
  * Beamline-to-TPC position and direction compatibility are stored as
  * observables, not cut by an inherited SP table. Tracks use a local TPC-entry
  * segment; showers use their reconstructed start and initial direction. MC
@@ -30,15 +31,19 @@
 #include "fhiclcpp/ParameterSet.h"
 #include "lardataobj/RecoBase/PFParticle.h"
 #include "lardataobj/RecoBase/PFParticleMetadata.h"
+#include "lardataobj/RecoBase/Hit.h"
 #include "lardataobj/RecoBase/Shower.h"
 #include "lardataobj/RecoBase/Slice.h"
 #include "lardataobj/RecoBase/Track.h"
+#include "lardata/DetectorInfoServices/DetectorClocksService.h"
+#include "larsim/MCCheater/ParticleInventoryService.h"
 #include "messagefacility/MessageLogger/MessageLogger.h"
 #include "nusimdata/SimulationBase/MCParticle.h"
 #include "nusimdata/SimulationBase/MCTruth.h"
 #include "protoduneana/PDHDAnalysisDiagnostics/Alg/BeamInstrumentationAlg.h"
 #include "protoduneana/PDHDAnalysisDiagnostics/Alg/BeamSelectionAlg.h"
 #include "protoduneana/Utilities/ProtoDUNEBeamlineUtils.h"
+#include "protoduneana/Utilities/ProtoDUNETruthUtils.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -61,6 +66,31 @@ constexpr int kCandidateAmbiguous = 3;
 constexpr int kTPCReferenceUnavailable = 0;
 constexpr int kTPCReferenceTrackVertexLocalDirection = 1;
 constexpr int kTPCReferenceShowerStart = 2;
+constexpr int kTruthCategoryUnavailable = 0;
+constexpr int kTruthCategoryIncidentBeam = 1;
+constexpr int kTruthCategoryCosmic = 2;
+constexpr int kTruthCategoryOtherBeamPrimary = 3;
+constexpr int kTruthCategoryPionInelastic = 4;
+constexpr int kTruthCategoryDecay = 5;
+constexpr int kTruthCategoryOther = 6;
+
+int ClassifySelectedTrackTruth(bool const matchesIncidentBeam,
+                               bool const originValid, int const origin,
+                               int const beamOrigin,
+                               int const cosmicOrigin,
+                               std::string const &process) {
+  if (matchesIncidentBeam) return kTruthCategoryIncidentBeam;
+  if (originValid && origin == cosmicOrigin) return kTruthCategoryCosmic;
+  if (process == "pi+Inelastic" || process == "pi-Inelastic") {
+    return kTruthCategoryPionInelastic;
+  }
+  if (process == "Decay") return kTruthCategoryDecay;
+  if (originValid && origin == beamOrigin && process == "primary") {
+    return kTruthCategoryOtherBeamPrimary;
+  }
+  return originValid || !process.empty() ? kTruthCategoryOther
+                                         : kTruthCategoryUnavailable;
+}
 
 template <class T> int IndexOf(std::vector<T> const &objects, T const *object) {
   if (!object)
@@ -113,7 +143,14 @@ struct TruthBeamReference {
               std::numeric_limits<double>::quiet_NaN(),
               std::numeric_limits<double>::quiet_NaN()};
   Direction3D direction;
+  // Finite transported-Geant points in the configured TPC comparison range.
+  // They are stored without interpolation or extrapolation.
+  std::vector<double> trajectoryXcm;
+  std::vector<double> trajectoryYcm;
+  std::vector<double> trajectoryZcm;
 };
+
+
 
 bool IsFinite(Point3D const &point) {
   return std::isfinite(point.x) && std::isfinite(point.y) &&
@@ -125,6 +162,29 @@ bool IsValidDirection(Direction3D const &direction) {
                                      direction.y * direction.y +
                                      direction.z * direction.z);
   return std::isfinite(magnitude) && magnitude > 0.;
+}
+
+bool StoreGeantTrajectoryInZRange(simb::MCParticle const &particle,
+                                  double const minimumZcm,
+                                  double const maximumZcm,
+                                  std::vector<double> &x,
+                                  std::vector<double> &y,
+                                  std::vector<double> &z) {
+  x.clear();
+  y.clear();
+  z.clear();
+  for (std::size_t index = 0; index < particle.NumberTrajectoryPoints();
+       ++index) {
+    auto const position = particle.Position(index);
+    Point3D const point{position.X(), position.Y(), position.Z()};
+    if (!IsFinite(point) || point.z < minimumZcm || point.z > maximumZcm) {
+      continue;
+    }
+    x.push_back(point.x);
+    y.push_back(point.y);
+    z.push_back(point.z);
+  }
+  return !x.empty() && x.size() == y.size() && x.size() == z.size();
 }
 
 // The lower-Z endpoint is the TPC entry convention for this beam geometry.
@@ -247,11 +307,18 @@ TruthBeamReference FindTruthBeamReference(
     return result;
   }
 
+  // Keep a non-owning pointer only while the MCTruth handle is in scope.  The
+  // selected generated primary supplies the beam identity (PDG, generator
+  // TrackID, initial momentum, and energy used for the Geant lookup below).
+  // Count every qualifying primary first: choosing the last one would hide an
+  // ambiguous generator record behind a plausible-looking reference.
   simb::MCParticle const *generated = nullptr;
   for (auto const &truth : *truthHandle) {
     if (static_cast<int>(truth.Origin()) != requiredOrigin) continue;
     for (int index = 0; index < truth.NParticles(); ++index) {
       auto const &particle = truth.GetParticle(index);
+      // "primary" identifies the generator-level beam particle within the
+      // configured beam-origin MCTruth record; daughters are not beam seeds.
       if (particle.Process() != "primary") continue;
       ++result.generatedPrimaryCount;
       generated = &particle;
@@ -284,6 +351,9 @@ TruthBeamReference FindTruthBeamReference(
   result.geantMatchUnique = geantMatches == 1;
   if (!result.geantMatchUnique) return result;
   result.geantTrackId = geant->TrackId();
+  StoreGeantTrajectoryInZRange(*geant, std::max(0., minimumZcm), maximumZcm,
+                               result.trajectoryXcm, result.trajectoryYcm,
+                               result.trajectoryZcm);
   if (geant->NumberTrajectoryPoints() > 0) {
     auto const position = geant->Position(0);
     result.start = {position.X(), position.Y(), position.Z()};
@@ -320,6 +390,8 @@ public:
   explicit PDHDBeamSelectionStages(fhicl::ParameterSet const &p)
       : EDAnalyzer(p), dataBeamTag_(p.get<art::InputTag>(
                            "DataBeamTag", art::InputTag{"beamevent"})),
+        mcBeamTag_(p.get<art::InputTag>("MCBeamTag",
+                                        art::InputTag{"generator"})),
         mcTruthTag_(
             p.get<art::InputTag>("MCTruthTag", art::InputTag{"generator"})),
         mcParticleTag_(p.get<art::InputTag>("MCParticleTag",
@@ -333,25 +405,32 @@ public:
             p.get<art::InputTag>("TrackTag", art::InputTag{"pandoraTrack"})),
         showerTag_(
             p.get<art::InputTag>("ShowerTag", art::InputTag{"pandoraShower"})),
+        truthHitTag_(
+            p.get<art::InputTag>("TruthHitTag", art::InputTag{"gaushit"})),
         beamInstrumentationNominalMomentumGeV_(
             p.get<double>("BeamInstrumentationNominalMomentumGeV")),
         evaluateDataPid_(p.get<bool>("EvaluateDataPID", false)),
         requireDataTrigger_(p.get<bool>("RequireGoodDataTrigger", true)),
         mcTruthBeamOrigin_(p.get<int>("MCTruthBeamOrigin", 4)),
+        mcCosmicOrigin_(p.get<int>("MCCosmicOrigin", 2)),
         mcTruthGeantEnergyToleranceGeV_(
             p.get<double>("MCTruthGeantEnergyToleranceGeV", 1.e-5)),
         mcTruthReferenceMinimumZcm_(p.get<double>("MCTruthReferenceMinimumZCm", 0.)),
         mcTruthReferenceMaximumZcm_(p.get<double>("MCTruthReferenceMaximumZCm", 600.)),
         tpcEntryDirectionLengthCm_(
             p.get<double>("TPCEntryDirectionLengthCm", 5.)),
+        enableMCTrackTruthMatching_(
+            p.get<bool>("EnableMCTrackTruthMatching", false)),
         printSummaryToStdout_(p.get<bool>("PrintSummaryToStdout", true)),
         maxEventMessages_(p.get<unsigned int>("MaxEventMessages", 3U)),
         beamline_(p.get<fhicl::ParameterSet>("BeamlineUtils")) {
     consumes<std::vector<beam::ProtoDUNEBeamEvent>>(dataBeamTag_);
+    consumes<std::vector<beam::ProtoDUNEBeamEvent>>(mcBeamTag_);
     consumes<std::vector<simb::MCTruth>>(mcTruthTag_);
     consumes<std::vector<simb::MCParticle>>(mcParticleTag_);
     consumes<std::vector<recob::PFParticle>>(pfpTag_);
     consumes<std::vector<recob::Track>>(trackTag_);
+    consumes<std::vector<recob::Hit>>(truthHitTag_);
     consumes<std::vector<recob::Shower>>(showerTag_);
   }
   void beginJob() override;
@@ -359,12 +438,35 @@ public:
   void endJob() override;
 
 private:
+  // Event-local ART handles and associations used only while building primary
+  // candidates.  This deliberately keeps ART pointers out of `out_`, whose
+  // address is held by CandidateTree for the whole job.
+  struct RecoPFPInputs {
+    art::Handle<std::vector<recob::PFParticle>> pfps;
+    art::Handle<std::vector<recob::Track>> tracks;
+    art::Handle<std::vector<recob::Shower>> showers;
+    std::unique_ptr<art::FindManyP<larpandoraobj::PFParticleMetadata>>
+        metadata;
+    std::unique_ptr<art::FindOneP<recob::Slice>> slices;
+    std::unique_ptr<art::FindManyP<recob::Track>> trackAssociations;
+    std::unique_ptr<art::FindManyP<recob::Shower>> showerAssociations;
+  };
+
+  // One transient Candidate is built for every primary PFParticle.  It is both
+  // the source of one BeamSelectionCandidate ROOT row and the bookkeeping
+  // record used after the loop to identify the unique selected candidate.
+  // It owns values and collection indices only: pointers to ART products are
+  // local to analyze() and are never stored in the ROOT-bound `out_` buffer.
   struct Candidate {
+    // Stable collection indices and the reconstructed-object classification.
     int pfp = -1;
     int track = -1;
     int shower = -1;
     int recoCandidateType = kCandidateNone;
     int tpcReferenceMethod = kTPCReferenceUnavailable;
+    // Association facts. `beamMetadata` is direct IsTestBeam metadata, while
+    // `beamSlicePrimary` is the nominal requirement: this primary belongs to
+    // the single Pandora beam-tagged slice found for the event.
     bool primary = false;
     bool beamMetadata = false;
     bool beamSlicePrimary = false;
@@ -376,24 +478,59 @@ private:
     bool hasRecoShower = false;
     bool hasUnambiguousRecoObject = false;
     bool recoObjectLengthValid = false;
+    // Reconstructed-object classification and diagnostic validity. Length and
+    // beam--TPC matching are recorded studies, not nominal selection stages.
     bool positionMatchValid = false;
     bool directionMatchValid = false;
     bool matchValid = false;
+    // Named selection gates repeated in each candidate row. Beam-event and
+    // beam-track multiplicity are event-level facts; they are copied here so
+    // candidate rows can be studied without joining EventTree.
     bool triggerPass = false;
     bool beamEventPass = false;
     bool beamTrackPass = false;
-    bool recoStartValid = false;
-    bool tpcEntryDirectionValid = false;
-    // `passesAllSelectionGates` is candidate-local; `selected` additionally
-    // means it is the event's unique passing candidate.
+    // `passesAllSelectionGates` means this primary passes every named gate,
+    // including the event-level unique-beam-event gate. `selected` additionally
+    // requires that it is the sole passing primary in the event.
     bool passesAllSelectionGates = false;
     bool selected = false;
     bool selectedTrack = false;
     bool selectedShower = false;
+    // MC-only selected-track truth diagnostics use the official utility
+    // matches. They retain the established ROOT schema and never enter
+    // is_selected; unavailable custom-energy quantities remain NaN.
+    bool recoTruthAssociationValid = false;
+    bool recoTruthUtilityMatchValid = false;
+    bool recoTruthUtilityOriginValid = false;
+    bool recoTruthBackgroundCategoryValid = false;
+    bool recoTruthUtilityMatchesBeamGeant = false;
+    bool recoTruthHitMatchValid = false;
+    bool recoTruthHitMatchesBeamGeant = false;
+    bool recoTruthPurityValid = false;
+    bool recoTruthCompletenessValid = false;
+    int recoTruthHitTrackId = -1;
+    int recoTruthHitPdg = 0;
+    int recoTruthUtilityTrackId = -1;
+    int recoTruthUtilityPdg = 0;
+    int recoTruthUtilityOrigin = -1;
+    int recoTruthBackgroundCategory = kTruthCategoryUnavailable;
+    std::string recoTruthUtilityProcess;
+    // Geant trajectory of the MCParticle matched to this selected reco track.
+    // Points are retained only in the configured TPC comparison Z range.
+    bool recoTruthUtilityTrajectoryValid = false;
+    std::vector<double> recoTruthUtilityTrajectoryXcm;
+    std::vector<double> recoTruthUtilityTrajectoryYcm;
+    std::vector<double> recoTruthUtilityTrajectoryZcm;
+    // Raw reconstruction-association multiplicities diagnose ambiguous rows.
     unsigned int trackAssociationCount = 0;
     unsigned int showerAssociationCount = 0;
-    // Position residuals remain unavailable only when a declared reference or
-    // reconstructed start is absent; cosine additionally needs both directions.
+    // Validity of the physical TPC reference used by match diagnostics. These
+    // are not selection gates: a short track may still retain a valid Vertex
+    // residual even when it has no local direction measurement.
+    bool recoStartValid = false;
+    bool tpcEntryDirectionValid = false;
+    // Beam--TPC diagnostic observables. Position residuals require a reference
+    // and reco start; cosine additionally requires both directions.
     double dx = std::numeric_limits<double>::quiet_NaN();
     double dy = std::numeric_limits<double>::quiet_NaN();
     double dz = std::numeric_limits<double>::quiet_NaN();
@@ -401,6 +538,12 @@ private:
     double cos = std::numeric_limits<double>::quiet_NaN();
     // Track/Shower::Length is the native reconstructed-object length in cm.
     double recoObjectLengthCm = std::numeric_limits<double>::quiet_NaN();
+    unsigned int recoTruthHitSharedCount = 0;
+    unsigned int recoTruthHitSharedDeltaRayCount = 0;
+    double recoTruthPurity = std::numeric_limits<double>::quiet_NaN();
+    double recoTruthCompleteness = std::numeric_limits<double>::quiet_NaN();
+    // Beam reference coordinates: data stores the fitted BI track; MC stores
+    // the transported Geant reference and labels that source explicitly.
     double beamlineEndXcm = std::numeric_limits<double>::quiet_NaN();
     double beamlineEndYcm = std::numeric_limits<double>::quiet_NaN();
     double beamlineEndZcm = std::numeric_limits<double>::quiet_NaN();
@@ -410,8 +553,9 @@ private:
     double beamlineStartXcm = std::numeric_limits<double>::quiet_NaN();
     double beamlineStartYcm = std::numeric_limits<double>::quiet_NaN();
     double beamlineStartZcm = std::numeric_limits<double>::quiet_NaN();
-    // This is Track::Vertex() for tracks and ShowerStart() for showers.  It
-    // is the position used for the SP-compatible residual definitions.
+    // TPC reference coordinates. This is Track::Vertex() for tracks and
+    // ShowerStart() for showers; it is the position used for SP-compatible
+    // residual definitions.
     double recoStartXcm = std::numeric_limits<double>::quiet_NaN();
     double recoStartYcm = std::numeric_limits<double>::quiet_NaN();
     double recoStartZcm = std::numeric_limits<double>::quiet_NaN();
@@ -429,15 +573,48 @@ private:
     std::vector<double> trackTrajectoryYcm;
     std::vector<double> trackTrajectoryZcm;
   };
-  art::InputTag dataBeamTag_, mcTruthTag_, mcParticleTag_, pfpTag_, pfpMetadataTag_,
-      pfpSliceTag_, trackTag_, showerTag_;
+  // Initializes every event summary/output member before any product lookup.
+  // This prevents an unavailable current-event quantity from inheriting a
+  // plausible value from the preceding event.
+  void ResetEventState(art::Event const &evt);
+  // Data obtains the fitted instrumentation track. MC obtains its nominal
+  // reference from generated identity matched to transported Geant; the
+  // stored MC BeamEvent remains diagnostics-only.
+  void AcquireBeamReference(art::Event const &evt,
+                            BeamInstrumentationRecord &dataBeamReference);
+  // Product and association availability are diagnostic states.  They do not
+  // create fallback candidates when one of the inputs is missing.
+  RecoPFPInputs AcquireRecoPFPInputs(art::Event const &evt);
+  // IsTestBeam metadata identifies a single Pandora slice; candidate building
+  // subsequently considers every primary associated with that slice.
+  void FindPandoraBeamSlice(RecoPFPInputs const &inputs);
+  // Builds one row per primary and evaluates only its named nominal gates.
+  // Match residuals, length, PID, and truth labels remain diagnostics.
+  std::vector<Candidate> BuildPrimaryCandidates(
+      RecoPFPInputs const &inputs,
+      BeamInstrumentationRecord const &dataBeamReference);
+  // Applies event-wide uniqueness after all candidate-local gates are known.
+  void SelectUniqueEventCandidate(std::vector<Candidate> &candidates);
+  // MC-only post-selection diagnostic. It labels only the selected track and
+  // cannot alter the already-complete nominal decision.
+  void AnnotateSelectedTrackTruth(art::Event const &evt,
+                                  std::vector<Candidate> &candidates);
+  void LogSelectionResult();
+  // CandidateTree binds module-owned `out_`, so copy each completed transient
+  // candidate immediately before Fill rather than rebinding any addresses.
+  void FillOutputTrees(std::vector<Candidate> const &candidates);
+  art::InputTag dataBeamTag_, mcBeamTag_, mcTruthTag_, mcParticleTag_, pfpTag_,
+      pfpMetadataTag_, pfpSliceTag_, trackTag_, showerTag_,
+      truthHitTag_;
   double beamInstrumentationNominalMomentumGeV_;
   bool evaluateDataPid_;
   bool requireDataTrigger_;
   int mcTruthBeamOrigin_;
+  int mcCosmicOrigin_;
   double mcTruthGeantEnergyToleranceGeV_;
   double mcTruthReferenceMinimumZcm_, mcTruthReferenceMaximumZcm_;
   double tpcEntryDirectionLengthCm_;
+  bool enableMCTrackTruthMatching_;
   bool printSummaryToStdout_;
   unsigned int maxEventMessages_;
   protoana::ProtoDUNEBeamlineUtils beamline_;
@@ -460,6 +637,16 @@ private:
   bool beamInstrumentationPidEvaluated_ = false;
   std::vector<double> beamInstrumentationMomentaGeV_;
   std::vector<int> beamInstrumentationPidCandidates_;
+  // MC-only diagnostics extracted from the stored generator BeamEvent.  They
+  // are intentionally separate from the Geant truth reference used by the
+  // nominal selection and beam--TPC residuals.
+  bool simulatedInstrumentationProductAvailable_ = false;
+  bool simulatedInstrumentationBeamEventUnique_ = false;
+  bool simulatedInstrumentationBeamTrackUnique_ = false;
+  bool simulatedInstrumentationReferenceValid_ = false;
+  Point3D simulatedInstrumentationEnd_;
+  Direction3D simulatedInstrumentationEndDirection_;
+  std::vector<double> simulatedInstrumentationMomentaGeV_;
   bool truthBeamProductAvailable_ = false, truthBeamPrimaryUnique_ = false,
        truthBeamGeantProductAvailable_ = false, truthBeamGeantMatchUnique_ = false,
        truthBeamReferenceValid_ = false;
@@ -478,6 +665,8 @@ private:
   Direction3D truthBeamDirection_{std::numeric_limits<double>::quiet_NaN(),
                                    std::numeric_limits<double>::quiet_NaN(),
                                    std::numeric_limits<double>::quiet_NaN()};
+  std::vector<double> truthBeamTrajectoryXcm_, truthBeamTrajectoryYcm_,
+      truthBeamTrajectoryZcm_;
   bool pfpMetadataAssociationAvailable_ = false;
   bool pfpSliceAssociationAvailable_ = false;
   bool pfpTrackAssociationAvailable_ = false;
@@ -509,6 +698,7 @@ void PDHDBeamSelectionStages::beginJob() {
       << ", EvaluateDataPID=" << evaluateDataPid_
       << ", RequireGoodDataTrigger=" << requireDataTrigger_
       << ", MCTruthBeamOrigin=" << mcTruthBeamOrigin_
+      << ", MCCosmicOrigin=" << mcCosmicOrigin_
       << ", MCTruthGeantEnergyToleranceGeV=" << mcTruthGeantEnergyToleranceGeV_
       << ", MCTruthReferenceZCm=[" << mcTruthReferenceMinimumZcm_ << ", "
       << mcTruthReferenceMaximumZcm_ << "]"
@@ -539,6 +729,30 @@ void PDHDBeamSelectionStages::beginJob() {
             beamInstrumentationMomentaGeV_);
   AddBranch(*eventTree_, "beam_instrumentation_pid_candidates",
             beamInstrumentationPidCandidates_);
+  // Stored MC BeamEvent diagnostics are kept distinct from the Geant truth
+  // reference that defines the MC beam--TPC comparison.
+  AddBranch(*eventTree_, "simulated_instrumentation_product_available",
+            simulatedInstrumentationProductAvailable_);
+  AddBranch(*eventTree_, "simulated_instrumentation_beam_event_unique",
+            simulatedInstrumentationBeamEventUnique_);
+  AddBranch(*eventTree_, "simulated_instrumentation_beam_track_unique",
+            simulatedInstrumentationBeamTrackUnique_);
+  AddBranch(*eventTree_, "simulated_instrumentation_reference_valid",
+            simulatedInstrumentationReferenceValid_);
+  AddBranch(*eventTree_, "simulated_instrumentation_end_x_cm",
+            simulatedInstrumentationEnd_.x);
+  AddBranch(*eventTree_, "simulated_instrumentation_end_y_cm",
+            simulatedInstrumentationEnd_.y);
+  AddBranch(*eventTree_, "simulated_instrumentation_end_z_cm",
+            simulatedInstrumentationEnd_.z);
+  AddBranch(*eventTree_, "simulated_instrumentation_end_direction_x",
+            simulatedInstrumentationEndDirection_.x);
+  AddBranch(*eventTree_, "simulated_instrumentation_end_direction_y",
+            simulatedInstrumentationEndDirection_.y);
+  AddBranch(*eventTree_, "simulated_instrumentation_end_direction_z",
+            simulatedInstrumentationEndDirection_.z);
+  AddBranch(*eventTree_, "simulated_instrumentation_momenta_GeV",
+            simulatedInstrumentationMomentaGeV_);
   // MC truth fields are unavailable on data; their validity fields preserve
   // that distinction rather than encoding a data value as a truth result.
   AddBranch(*eventTree_, "truth_beam_product_available",
@@ -616,6 +830,28 @@ void PDHDBeamSelectionStages::beginJob() {
             beamInstrumentationMomentaGeV_);
   AddBranch(*candidateTree_, "beam_instrumentation_pid_candidates",
             beamInstrumentationPidCandidates_);
+  AddBranch(*candidateTree_, "simulated_instrumentation_product_available",
+            simulatedInstrumentationProductAvailable_);
+  AddBranch(*candidateTree_, "simulated_instrumentation_beam_event_unique",
+            simulatedInstrumentationBeamEventUnique_);
+  AddBranch(*candidateTree_, "simulated_instrumentation_beam_track_unique",
+            simulatedInstrumentationBeamTrackUnique_);
+  AddBranch(*candidateTree_, "simulated_instrumentation_reference_valid",
+            simulatedInstrumentationReferenceValid_);
+  AddBranch(*candidateTree_, "simulated_instrumentation_end_x_cm",
+            simulatedInstrumentationEnd_.x);
+  AddBranch(*candidateTree_, "simulated_instrumentation_end_y_cm",
+            simulatedInstrumentationEnd_.y);
+  AddBranch(*candidateTree_, "simulated_instrumentation_end_z_cm",
+            simulatedInstrumentationEnd_.z);
+  AddBranch(*candidateTree_, "simulated_instrumentation_end_direction_x",
+            simulatedInstrumentationEndDirection_.x);
+  AddBranch(*candidateTree_, "simulated_instrumentation_end_direction_y",
+            simulatedInstrumentationEndDirection_.y);
+  AddBranch(*candidateTree_, "simulated_instrumentation_end_direction_z",
+            simulatedInstrumentationEndDirection_.z);
+  AddBranch(*candidateTree_, "simulated_instrumentation_momenta_GeV",
+            simulatedInstrumentationMomentaGeV_);
   // Event-level generated beam identity is repeated per candidate so a single
   // candidate tree supports data/MC overlay studies without a fragile join.
   AddBranch(*candidateTree_, "truth_beam_product_available",
@@ -645,6 +881,60 @@ void PDHDBeamSelectionStages::beginJob() {
   AddBranch(*candidateTree_, "truth_beam_direction_x", truthBeamDirection_.x);
   AddBranch(*candidateTree_, "truth_beam_direction_y", truthBeamDirection_.y);
   AddBranch(*candidateTree_, "truth_beam_direction_z", truthBeamDirection_.z);
+  AddBranch(*candidateTree_, "truth_beam_trajectory_x_cm",
+            truthBeamTrajectoryXcm_);
+  AddBranch(*candidateTree_, "truth_beam_trajectory_y_cm",
+            truthBeamTrajectoryYcm_);
+  AddBranch(*candidateTree_, "truth_beam_trajectory_z_cm",
+            truthBeamTrajectoryZcm_);
+  // MC-only selected-track truth diagnostics. Branch names are retained while
+  // their matching source is the official ProtoDUNETruthUtils API.
+  AddBranch(*candidateTree_, "reco_truth_association_valid",
+            out_.recoTruthAssociationValid);
+  AddBranch(*candidateTree_, "reco_truth_utility_match_valid",
+            out_.recoTruthUtilityMatchValid);
+  AddBranch(*candidateTree_, "reco_truth_utility_origin_valid",
+            out_.recoTruthUtilityOriginValid);
+  AddBranch(*candidateTree_, "reco_truth_utility_origin",
+            out_.recoTruthUtilityOrigin);
+  AddBranch(*candidateTree_, "reco_truth_utility_process",
+            out_.recoTruthUtilityProcess);
+  AddBranch(*candidateTree_, "reco_truth_background_category_valid",
+            out_.recoTruthBackgroundCategoryValid);
+  AddBranch(*candidateTree_, "reco_truth_background_category",
+            out_.recoTruthBackgroundCategory);
+  AddBranch(*candidateTree_, "reco_truth_utility_track_id",
+            out_.recoTruthUtilityTrackId);
+  AddBranch(*candidateTree_, "reco_truth_utility_pdg",
+            out_.recoTruthUtilityPdg);
+  AddBranch(*candidateTree_, "reco_truth_utility_trajectory_valid",
+            out_.recoTruthUtilityTrajectoryValid);
+  AddBranch(*candidateTree_, "reco_truth_utility_trajectory_x_cm",
+            out_.recoTruthUtilityTrajectoryXcm);
+  AddBranch(*candidateTree_, "reco_truth_utility_trajectory_y_cm",
+            out_.recoTruthUtilityTrajectoryYcm);
+  AddBranch(*candidateTree_, "reco_truth_utility_trajectory_z_cm",
+            out_.recoTruthUtilityTrajectoryZcm);
+  AddBranch(*candidateTree_, "reco_truth_utility_matches_beam_geant",
+            out_.recoTruthUtilityMatchesBeamGeant);
+  AddBranch(*candidateTree_, "reco_truth_hit_match_valid",
+            out_.recoTruthHitMatchValid);
+  AddBranch(*candidateTree_, "reco_truth_hit_track_id",
+            out_.recoTruthHitTrackId);
+  AddBranch(*candidateTree_, "reco_truth_hit_pdg", out_.recoTruthHitPdg);
+  AddBranch(*candidateTree_, "reco_truth_hit_shared_count",
+            out_.recoTruthHitSharedCount);
+  AddBranch(*candidateTree_, "reco_truth_hit_shared_delta_ray_count",
+            out_.recoTruthHitSharedDeltaRayCount);
+  AddBranch(*candidateTree_, "reco_truth_hit_matches_beam_geant",
+            out_.recoTruthHitMatchesBeamGeant);
+  AddBranch(*candidateTree_, "reco_truth_purity_valid",
+            out_.recoTruthPurityValid);
+  AddBranch(*candidateTree_, "reco_truth_purity", out_.recoTruthPurity);
+  AddBranch(*candidateTree_, "reco_truth_completeness_valid",
+            out_.recoTruthCompletenessValid);
+  AddBranch(*candidateTree_, "reco_truth_completeness",
+            out_.recoTruthCompleteness);
   AddBranch(*candidateTree_, "pfp_index", out_.pfp);
   AddBranch(*candidateTree_, "track_index", out_.track);
   AddBranch(*candidateTree_, "shower_index", out_.shower);
@@ -741,7 +1031,7 @@ void PDHDBeamSelectionStages::beginJob() {
   AddBranch(*candidateTree_, "is_selected_shower", out_.selectedShower);
   AddBranch(*candidateTree_, "beam_reference_source", referenceSource_);
 }
-void PDHDBeamSelectionStages::analyze(art::Event const &evt) {
+void PDHDBeamSelectionStages::ResetEventState(art::Event const &evt) {
   ++eventsProcessed_;
   run_ = evt.run();
   subrun_ = evt.subRun();
@@ -766,6 +1056,19 @@ void PDHDBeamSelectionStages::analyze(art::Event const &evt) {
   beamInstrumentationPidEvaluated_ = false;
   beamInstrumentationMomentaGeV_.clear();
   beamInstrumentationPidCandidates_.clear();
+  simulatedInstrumentationProductAvailable_ = false;
+  simulatedInstrumentationBeamEventUnique_ = false;
+  simulatedInstrumentationBeamTrackUnique_ = false;
+  simulatedInstrumentationReferenceValid_ = false;
+  simulatedInstrumentationEnd_ = {
+      std::numeric_limits<double>::quiet_NaN(),
+      std::numeric_limits<double>::quiet_NaN(),
+      std::numeric_limits<double>::quiet_NaN()};
+  simulatedInstrumentationEndDirection_ = {
+      std::numeric_limits<double>::quiet_NaN(),
+      std::numeric_limits<double>::quiet_NaN(),
+      std::numeric_limits<double>::quiet_NaN()};
+  simulatedInstrumentationMomentaGeV_.clear();
   nPrimary_ = nBeamPrimary_ = nBeamSlicePrimary_ = nPassing_ = 0;
   nPassingTrack_ = nPassingShower_ = 0;
   selectedPfp_ = selectedTrack_ = selectedShower_ = -1;
@@ -787,7 +1090,16 @@ void PDHDBeamSelectionStages::analyze(art::Event const &evt) {
   truthBeamDirection_ = {std::numeric_limits<double>::quiet_NaN(),
                          std::numeric_limits<double>::quiet_NaN(),
                          std::numeric_limits<double>::quiet_NaN()};
-  BeamInstrumentationRecord bi;
+  truthBeamTrajectoryXcm_.clear();
+  truthBeamTrajectoryYcm_.clear();
+  truthBeamTrajectoryZcm_.clear();
+}
+
+void PDHDBeamSelectionStages::AcquireBeamReference(
+    art::Event const &evt, BeamInstrumentationRecord &bi) {
+  // Phase 1: obtain the event-level beam reference. Data uses the fitted BI
+  // track; MC uses generated-primary plus transported-Geant truth. The stored
+  // simulated BeamEvent is retained separately for diagnostics only.
   if (isData_) {
     auto const beamHandle =
         evt.getHandle<std::vector<beam::ProtoDUNEBeamEvent>>(dataBeamTag_);
@@ -810,6 +1122,32 @@ void PDHDBeamSelectionStages::analyze(art::Event const &evt) {
       referenceSource_ = "data_instrumentation_fitted_end";
     }
   } else {
+    // The generated BeamEvent is retained as a diagnostic-only simulated
+    // instrumentation reference.  Do not use it to replace the Geant truth
+    // reference or alter any nominal MC selection gate.
+    auto const simulatedBeamHandle =
+        evt.getHandle<std::vector<beam::ProtoDUNEBeamEvent>>(mcBeamTag_);
+    simulatedInstrumentationProductAvailable_ = bool(simulatedBeamHandle);
+    simulatedInstrumentationBeamEventUnique_ =
+        simulatedBeamHandle && simulatedBeamHandle->size() == 1;
+    if (simulatedInstrumentationBeamEventUnique_) {
+      auto const simulatedInstrumentation = BeamInstrumentationAlg::Extract(
+          simulatedBeamHandle->front(), beamline_,
+          BeamReferenceSource::SimulatedInstrumentation,
+          beamInstrumentationNominalMomentumGeV_, false, false, {});
+      simulatedInstrumentationMomentaGeV_ =
+          simulatedInstrumentation.momentaGeV;
+      simulatedInstrumentationBeamTrackUnique_ =
+          simulatedInstrumentation.tracks.size() == 1;
+      if (simulatedInstrumentationBeamTrackUnique_) {
+        simulatedInstrumentationEnd_ =
+            simulatedInstrumentation.tracks.front().end;
+        simulatedInstrumentationEndDirection_ =
+            simulatedInstrumentation.tracks.front().endDirection;
+        simulatedInstrumentationReferenceValid_ =
+            IsFinite(simulatedInstrumentationEnd_);
+      }
+    }
     auto const truthHandle = evt.getHandle<std::vector<simb::MCTruth>>(mcTruthTag_);
     auto const particleHandle =
         evt.getHandle<std::vector<simb::MCParticle>>(mcParticleTag_);
@@ -831,6 +1169,9 @@ void PDHDBeamSelectionStages::analyze(art::Event const &evt) {
     truthBeamEntry_ = truth.entry;
     truthBeamEnd_ = truth.end;
     truthBeamDirection_ = truth.direction;
+    truthBeamTrajectoryXcm_ = truth.trajectoryXcm;
+    truthBeamTrajectoryYcm_ = truth.trajectoryYcm;
+    truthBeamTrajectoryZcm_ = truth.trajectoryZcm;
     // The truth reference identifies a generated beam event; it never applies
     // a truth-PDG species cut to the reconstructed candidate.
     beamProductAvailable_ = truthBeamProductAvailable_;
@@ -845,9 +1186,25 @@ void PDHDBeamSelectionStages::analyze(art::Event const &evt) {
     uniqueBeamTrackEvents_ += beamTrackUnique_;
     if (truthBeamReferenceValid_) referenceSource_ = "mc_truth_geant_entry";
   }
-  auto ph = evt.getHandle<std::vector<recob::PFParticle>>(pfpTag_);
-  auto th = evt.getHandle<std::vector<recob::Track>>(trackTag_);
-  auto sh = evt.getHandle<std::vector<recob::Shower>>(showerTag_);
+}
+
+PDHDBeamSelectionStages::RecoPFPInputs
+PDHDBeamSelectionStages::AcquireRecoPFPInputs(art::Event const &evt) {
+  // Phase 2: obtain reconstructed PFP collections and their association
+  // helpers. Missing products remain explicit event/candidate status states.
+  RecoPFPInputs inputs;
+  // Short aliases make the ART retrieval below match the names used later in
+  // the candidate builder. They refer to the same event-local storage.
+  auto &ph = inputs.pfps;
+  auto &th = inputs.tracks;
+  auto &sh = inputs.showers;
+  auto &metadata = inputs.metadata;
+  auto &slices = inputs.slices;
+  auto &tracks = inputs.trackAssociations;
+  auto &showers = inputs.showerAssociations;
+  ph = evt.getHandle<std::vector<recob::PFParticle>>(pfpTag_);
+  th = evt.getHandle<std::vector<recob::Track>>(trackTag_);
+  sh = evt.getHandle<std::vector<recob::Shower>>(showerTag_);
   pfpAvailableEvents_ += bool(ph);
   if ((!beamProductAvailable_ || !ph) &&
       eventMessagesEmitted_ < maxEventMessages_) {
@@ -865,10 +1222,6 @@ void PDHDBeamSelectionStages::analyze(art::Event const &evt) {
   // Query each PFP association by collection index, not PFParticle::Self().
   // This follows Pandora's association products while remaining valid when
   // Self identifiers are not contiguous collection indices.
-  std::unique_ptr<art::FindManyP<larpandoraobj::PFParticleMetadata>> metadata;
-  std::unique_ptr<art::FindOneP<recob::Slice>> slices;
-  std::unique_ptr<art::FindManyP<recob::Track>> tracks;
-  std::unique_ptr<art::FindManyP<recob::Shower>> showers;
   if (ph) {
     try {
       metadata = std::make_unique<art::FindManyP<larpandoraobj::PFParticleMetadata>>(
@@ -928,8 +1281,17 @@ void PDHDBeamSelectionStages::analyze(art::Event const &evt) {
     }
   }
 
-  // Pandora's IsTestBeam metadata identifies the beam slice. The nominal TPC
-  // candidate is every primary PFP associated with that selected slice.
+  return inputs;
+}
+
+void PDHDBeamSelectionStages::FindPandoraBeamSlice(
+    RecoPFPInputs const &inputs) {
+  // Phase 3: identify the single Pandora beam slice. IsTestBeam metadata
+  // identifies the beam slice. The nominal TPC candidate is every primary PFP
+  // associated with that selected slice.
+  auto const &ph = inputs.pfps;
+  auto const &metadata = inputs.metadata;
+  auto const &slices = inputs.slices;
   std::set<int> beamSliceIds;
   if (ph && metadata && slices) {
     for (std::size_t index = 0; index < ph->size(); ++index) {
@@ -964,7 +1326,22 @@ void PDHDBeamSelectionStages::analyze(art::Event const &evt) {
   if (pandoraBeamSliceFound_) {
     pandoraBeamSliceId_ = *beamSliceIds.begin();
   }
+}
 
+std::vector<PDHDBeamSelectionStages::Candidate>
+PDHDBeamSelectionStages::BuildPrimaryCandidates(
+    RecoPFPInputs const &inputs,
+    BeamInstrumentationRecord const &bi) {
+  // Phase 4: build one diagnostic/selection record for each primary PFP. The
+  // vector is intentionally retained until every primary has been counted: a
+  // candidate cannot receive is_selected until event-wide uniqueness is known.
+  auto const &ph = inputs.pfps;
+  auto const &th = inputs.tracks;
+  auto const &sh = inputs.showers;
+  auto const &metadata = inputs.metadata;
+  auto const &slices = inputs.slices;
+  auto const &tracks = inputs.trackAssociations;
+  auto const &showers = inputs.showerAssociations;
   std::vector<Candidate> candidates;
   if (ph) {
     for (std::size_t i = 0; i < ph->size(); ++i) {
@@ -972,10 +1349,16 @@ void PDHDBeamSelectionStages::analyze(art::Event const &evt) {
       if (!p.IsPrimary()) {
         continue;
       }
+
+      // A Candidate starts from this primary PFP. It remains in `candidates`
+      // even when an association is missing or ambiguous so cut-flow studies
+      // can distinguish rejection from absent reconstruction information.
       Candidate c;
       c.pfp = i;
       c.primary = true;
       ++nPrimary_;
+      // First establish the two related but distinct Pandora facts: direct
+      // IsTestBeam metadata, and membership in the event's unique beam slice.
       if (metadata) {
         try {
           auto const &metadataForPfp = metadata->at(i);
@@ -1005,6 +1388,9 @@ void PDHDBeamSelectionStages::analyze(art::Event const &evt) {
       if (c.beamSlicePrimary) {
         ++nBeamSlicePrimary_;
       }
+      // Resolve all associated object counts before choosing the single object
+      // used for geometry. A first pointer is retained only to recover its
+      // collection index; it never resolves an ambiguous association.
       recob::Track const *tr = nullptr;
       recob::Shower const *sw = nullptr;
       if (tracks) {
@@ -1049,11 +1435,17 @@ void PDHDBeamSelectionStages::analyze(art::Event const &evt) {
       } else if (c.hasRecoTrack || c.hasRecoShower) {
         c.recoCandidateType = kCandidateAmbiguous;
       }
+      // Length is useful for diagnostics, but a finite length is deliberately
+      // not part of the unambiguous-track/shower selection definition.
       c.recoObjectLengthValid =
           c.hasUnambiguousRecoObject && std::isfinite(c.recoObjectLengthCm) &&
           c.recoObjectLengthCm >= 0.;
+      // Fill the generic beam--TPC match input after the PFP's object type and
+      // references are known. Its residuals are diagnostic observables only.
       BeamMatchInput mi;
       mi.beamReferenceValid = beamTrackUnique_;
+      // Store the exact reference coordinates that define this row's residuals.
+      // The source is data BI in data and transported Geant truth in MC.
       if (beamTrackUnique_) {
         if (isData_) {
           auto const &bt = bi.tracks.front();
@@ -1089,6 +1481,8 @@ void PDHDBeamSelectionStages::analyze(art::Event const &evt) {
           mi.referenceSource = BeamReferenceSource::TruthProjection;
         }
       }
+      // Next derive the TPC reference from the unique reconstructed object.
+      // No reference is invented for ambiguous or absent reco associations.
       if (c.recoCandidateType == kCandidateTrack) {
         auto const trajectory = ExtractTrackTrajectoryFromEntry(*tr);
         for (auto const &point : trajectory) {
@@ -1152,6 +1546,8 @@ void PDHDBeamSelectionStages::analyze(art::Event const &evt) {
           mi.recoDirection = initialDirection;
         }
       }
+      // Calculate all available match observables before evaluating selection.
+      // Their validity and values are written even though they do not cut here.
       auto const m = BeamSelectionAlg::EvaluateInstrumentationMatch(mi);
       c.positionMatchValid = m.positionValid;
       c.directionMatchValid = m.directionValid;
@@ -1167,9 +1563,11 @@ void PDHDBeamSelectionStages::analyze(art::Event const &evt) {
                                : true;
       c.beamEventPass = beamEventUnique_;
       c.beamTrackPass = beamTrackUnique_;
-      // These are the four per-candidate nominal stages.  The beam-event
-      // uniqueness gate is event-level and remains intentionally outside the
-      // staged candidate algorithm.
+      // Nominal gate equation for this primary:
+      // trigger x unique beam track x Pandora beam-slice primary x exactly one
+      // reco object. The separate unique-beam-event gate is event-level.
+      // Position/direction residuals, object length, PID, and truth labels do
+      // not enter is_selected.
       auto const nominalStageResult = BeamSelectionAlg::EvaluateCandidateStages(
           {c.triggerPass, c.beamTrackPass, c.beamSlicePrimary,
            c.hasUnambiguousRecoObject});
@@ -1188,6 +1586,14 @@ void PDHDBeamSelectionStages::analyze(art::Event const &evt) {
       candidates.push_back(c);
     }
   }
+  return candidates;
+}
+
+void PDHDBeamSelectionStages::SelectUniqueEventCandidate(
+    std::vector<Candidate> &candidates) {
+  // Phase 5: convert candidate-local pass flags into the event decision. A
+  // single passing record is selected; zero records reject the event and two
+  // or more records make it explicitly ambiguous.
   bool const hasUniquePassingCandidate = nPassing_ == 1;
   selectionAmbiguous_ = nPassing_ > 1;
   if (hasUniquePassingCandidate) {
@@ -1217,7 +1623,106 @@ void PDHDBeamSelectionStages::analyze(art::Event const &evt) {
   }
   selectedEvents_ += hasSelectedCandidate_;
   ambiguousEvents_ += selectionAmbiguous_;
+}
 
+void PDHDBeamSelectionStages::AnnotateSelectedTrackTruth(
+    art::Event const &evt, std::vector<Candidate> &candidates) {
+  // This post-selection diagnostic cannot modify is_selected or recover a
+  // rejected event.
+  if (isData_ || !enableMCTrackTruthMatching_ || !truthBeamGeantMatchUnique_) {
+    return;
+  }
+
+  auto selected = std::find_if(
+      candidates.begin(), candidates.end(), [](Candidate const &candidate) {
+        return candidate.selectedTrack;
+      });
+  if (selected == candidates.end() || selected->track < 0) return;
+
+  try {
+    auto const clockData =
+        art::ServiceHandle<detinfo::DetectorClocksService>()->DataFor(evt);
+    protoana::ProtoDUNETruthUtils truthUtils;
+    auto const tracks = evt.getHandle<std::vector<recob::Track>>(trackTag_);
+    if (!tracks || static_cast<std::size_t>(selected->track) >= tracks->size()) {
+      return;
+    }
+    recob::Track const &track =
+        tracks->at(static_cast<std::size_t>(selected->track));
+
+    auto const *utilityMatch = truthUtils.GetMCParticleFromRecoTrack(
+        clockData, track, evt, trackTag_.encode());
+    if (utilityMatch) {
+      selected->recoTruthUtilityMatchValid = true;
+      selected->recoTruthUtilityTrackId = utilityMatch->TrackId();
+      selected->recoTruthUtilityPdg = utilityMatch->PdgCode();
+      selected->recoTruthUtilityMatchesBeamGeant =
+          utilityMatch->TrackId() == truthBeamGeantTrackId_;
+      selected->recoTruthUtilityProcess = utilityMatch->Process();
+      art::ServiceHandle<cheat::ParticleInventoryService> particleInventory;
+      auto const matchedTruth =
+          particleInventory->TrackIdToMCTruth_P(utilityMatch->TrackId());
+      if (matchedTruth) {
+        selected->recoTruthUtilityOriginValid = true;
+        selected->recoTruthUtilityOrigin =
+            static_cast<int>(matchedTruth->Origin());
+      }
+      selected->recoTruthBackgroundCategory = ClassifySelectedTrackTruth(
+          selected->recoTruthUtilityMatchesBeamGeant,
+          selected->recoTruthUtilityOriginValid,
+          selected->recoTruthUtilityOrigin, mcTruthBeamOrigin_,
+          mcCosmicOrigin_, selected->recoTruthUtilityProcess);
+      selected->recoTruthBackgroundCategoryValid =
+          selected->recoTruthBackgroundCategory != kTruthCategoryUnavailable;
+      selected->recoTruthUtilityTrajectoryValid = StoreGeantTrajectoryInZRange(
+          *utilityMatch, std::max(0., mcTruthReferenceMinimumZcm_),
+          mcTruthReferenceMaximumZcm_,
+          selected->recoTruthUtilityTrajectoryXcm,
+          selected->recoTruthUtilityTrajectoryYcm,
+          selected->recoTruthUtilityTrajectoryZcm);
+    }
+
+    // Standard shared-hit match preserves the established hit-match branches.
+    auto const hitMatch = truthUtils.GetMCParticleByHits(
+        clockData, track, evt, trackTag_.encode(), truthHitTag_.encode());
+    if (hitMatch.particle) {
+      selected->recoTruthHitMatchValid = true;
+      selected->recoTruthHitTrackId = hitMatch.particle->TrackId();
+      selected->recoTruthHitPdg = hitMatch.particle->PdgCode();
+      selected->recoTruthHitSharedCount = static_cast<unsigned int>(
+          std::min(hitMatch.nSharedHits,
+                   static_cast<std::size_t>(
+                       std::numeric_limits<unsigned int>::max())));
+      selected->recoTruthHitSharedDeltaRayCount = static_cast<unsigned int>(
+          std::min(hitMatch.nSharedDeltaRayHits,
+                   static_cast<std::size_t>(
+                       std::numeric_limits<unsigned int>::max())));
+      selected->recoTruthHitMatchesBeamGeant =
+          hitMatch.particle->TrackId() == truthBeamGeantTrackId_;
+    }
+
+    selected->recoTruthPurity =
+        truthUtils.GetPurity(clockData, track, evt, trackTag_.encode());
+    selected->recoTruthPurityValid = std::isfinite(selected->recoTruthPurity);
+    selected->recoTruthCompleteness = truthUtils.GetCompleteness(
+        clockData, track, evt, trackTag_.encode(), truthHitTag_.encode());
+    selected->recoTruthCompletenessValid =
+        std::isfinite(selected->recoTruthCompleteness);
+    selected->recoTruthAssociationValid = true;
+  } catch (std::exception const &error) {
+    // Preserve the already-written selection decision and make the failed
+    // optional diagnostic visible through its default invalid branches.
+    if (eventMessagesEmitted_ < maxEventMessages_) {
+      mf::LogWarning("PDHDBeamSelectionStages")
+          << "Could not label selected MC track for run " << run_
+          << ", subrun " << subrun_ << ", event " << event_ << ": "
+          << error.what();
+      ++eventMessagesEmitted_;
+    }
+  }
+}
+
+void PDHDBeamSelectionStages::LogSelectionResult() {
   if (eventMessagesEmitted_ < maxEventMessages_) {
     mf::LogInfo("PDHDBeamSelectionStages")
         << "Selection result for run " << run_ << ", subrun " << subrun_
@@ -1237,11 +1742,33 @@ void PDHDBeamSelectionStages::analyze(art::Event const &evt) {
         << ", ambiguous=" << selectionAmbiguous_ << ".";
     ++eventMessagesEmitted_;
   }
+}
+
+void PDHDBeamSelectionStages::FillOutputTrees(
+    std::vector<Candidate> const &candidates) {
+  // Phase 6: write every primary-PFP diagnostic row, including rejected and
+  // ambiguous candidates, then write one event summary row with multiplicities.
   for (auto const &c : candidates) {
     out_ = c;
     candidateTree_->Fill();
   }
   eventTree_->Fill();
+}
+
+void PDHDBeamSelectionStages::analyze(art::Event const &evt) {
+  ResetEventState(evt);
+
+  BeamInstrumentationRecord dataBeamReference;
+  AcquireBeamReference(evt, dataBeamReference);
+
+  auto recoInputs = AcquireRecoPFPInputs(evt);
+  FindPandoraBeamSlice(recoInputs);
+  auto candidates = BuildPrimaryCandidates(recoInputs, dataBeamReference);
+
+  SelectUniqueEventCandidate(candidates);
+  AnnotateSelectedTrackTruth(evt, candidates);
+  LogSelectionResult();
+  FillOutputTrees(candidates);
 }
 
 void PDHDBeamSelectionStages::endJob() {
