@@ -6,6 +6,7 @@ set(BEAM_MODULE_LIBRARIES
   ProtoDUNEUtilities
   dunecore::DuneObj
   nusimdata::SimulationBase
+  lardataalg::DetectorInfo
   lardataobj::RecoBase
   larsim::MCCheater_ParticleInventoryService_service
   art::Framework_Core
@@ -20,4 +21,6 @@ cet_build_plugin(PDHDBeamInstrumentation art::Module
   SOURCE PDHDBeamInstrumentation_module.cc LIBRARIES ${BEAM_MODULE_LIBRARIES})
 cet_build_plugin(PDHDBeamSelectionStages art::Module
   SOURCE PDHDBeamSelectionStages_module.cc LIBRARIES ${BEAM_MODULE_LIBRARIES})
+cet_build_plugin(PDHDRecoTruthMatch art::Module
+  SOURCE PDHDRecoTruthMatch_module.cc LIBRARIES ${BEAM_MODULE_LIBRARIES})
 install_source()

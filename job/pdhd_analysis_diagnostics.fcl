@@ -67,6 +67,8 @@ pdhd_beam_selection_stages: {
   # gives its transported trajectory at the declared comparison surface.
   MCTruthTag: "generator"
   MCParticleTag: "largeant"
+  # 4 is simb::kSingleParticle in this nusimdata release: the generated
+  # ProtoDUNE single-particle beam record.
   MCTruthBeamOrigin: 4
   # PDG plus initial energy maps generator to Geant; TrackIDs are distinct.
   MCTruthGeantEnergyToleranceGeV: 1.e-5
@@ -104,6 +106,22 @@ pdhd_beam_selection_stages: {
   # Bound per-event messages; endJob always reports complete counters.
   MaxEventMessages: 3
   BeamlineUtils: @local::standard_protodunebeamlineutils
+}
+
+# One event-level inventory of every reconstructed track. The beam-slice flag
+# comes solely from Pandora metadata and PFP--slice/track associations. Truth
+# matching is disabled here so the shared table remains safe in data jobs.
+pdhd_reco_truth_match: {
+  module_type: "PDHDRecoTruthMatch"
+  PFParticleTag: "pandora"
+  PFParticleMetadataTag: "pandora"
+  PFParticleSliceTag: "pandora"
+  TrackTag: "pandoraTrack"
+  HitTag: "gaushit"
+  MCParticleTag: "largeant"
+  EnableMCTruthMatching: false
+  MaximumHierarchyDepth: 1000
+  MaxEventMessages: 3
 }
 
 END_PROLOG

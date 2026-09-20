@@ -13,9 +13,10 @@
  * observables, not cut by an inherited SP table. Tracks use a local TPC-entry
  * segment; showers use their reconstructed start and initial direction. MC
  * truth labels are diagnostic and do not select a particle species.
- * CandidateTree stores each selection component and match
- * observable; EventTree stores multiplicities. A candidate is selected only
- * when exactly one passes the named reconstruction stages.
+ * CandidateTree stores each selection component and match observable;
+ * EventTree stores multiplicities plus one normalized all-track display
+ * inventory. A candidate is selected only when exactly one passes the named
+ * reconstruction stages.
  */
 #include "TTree.h"
 #include "art/Framework/Core/EDAnalyzer.h"
@@ -26,6 +27,7 @@
 #include "canvas/Utilities/InputTag.h"
 #include "canvas/Persistency/Common/FindManyP.h"
 #include "canvas/Persistency/Common/FindOneP.h"
+#include "canvas/Persistency/Common/Ptr.h"
 #include "cetlib_except/exception.h"
 #include "dunecore/DuneObj/ProtoDUNEBeamEvent.h"
 #include "fhiclcpp/ParameterSet.h"
@@ -36,6 +38,7 @@
 #include "lardataobj/RecoBase/Slice.h"
 #include "lardataobj/RecoBase/Track.h"
 #include "lardata/DetectorInfoServices/DetectorClocksService.h"
+#include "lardataalg/DetectorInfo/DetectorClocksData.h"
 #include "larsim/MCCheater/ParticleInventoryService.h"
 #include "messagefacility/MessageLogger/MessageLogger.h"
 #include "nusimdata/SimulationBase/MCParticle.h"
@@ -50,6 +53,7 @@
 #include <exception>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <memory>
 #include <set>
 #include <sstream>
@@ -64,8 +68,12 @@ constexpr int kCandidateTrack = 1;
 constexpr int kCandidateShower = 2;
 constexpr int kCandidateAmbiguous = 3;
 constexpr int kTPCReferenceUnavailable = 0;
+// Code 1 is retained for already-produced ROOT files where Track::Vertex()
+// was the position residual reference. New track rows use code 3, making the
+// lower-Z entry definition explicit without reinterpreting old outputs.
 constexpr int kTPCReferenceTrackVertexLocalDirection = 1;
 constexpr int kTPCReferenceShowerStart = 2;
+constexpr int kTPCReferenceTrackEntryLocalDirection = 3;
 constexpr int kTruthCategoryUnavailable = 0;
 constexpr int kTruthCategoryIncidentBeam = 1;
 constexpr int kTruthCategoryCosmic = 2;
@@ -115,6 +123,10 @@ struct TPCEntryDirection {
                 std::numeric_limits<double>::quiet_NaN()};
   Direction3D direction;
   double sampledLengthCm = std::numeric_limits<double>::quiet_NaN();
+  // True when the lower-Z entry corresponds to Track::End().  This lets the
+  // nominal endpoint tangent be oriented into the TPC without guessing from
+  // the fitted Vertex() ordering.
+  bool entryAtTrackEnd = false;
 };
 
 // MC keeps generated-particle identity and transported Geant reference
@@ -148,6 +160,12 @@ struct TruthBeamReference {
   std::vector<double> trajectoryXcm;
   std::vector<double> trajectoryYcm;
   std::vector<double> trajectoryZcm;
+  // Full finite path, including the simulated beamline upstream of the TPC.
+  // It is an event-display diagnostic, distinct from the Z-window trajectory.
+  bool fullTrajectoryValid = false;
+  std::vector<double> fullTrajectoryXcm;
+  std::vector<double> fullTrajectoryYcm;
+  std::vector<double> fullTrajectoryZcm;
 };
 
 
@@ -187,16 +205,34 @@ bool StoreGeantTrajectoryInZRange(simb::MCParticle const &particle,
   return !x.empty() && x.size() == y.size() && x.size() == z.size();
 }
 
+// Event-display provenance only: retain every finite transported-Geant point,
+// including the simulated beamline before the TPC. This is kept in EventTree,
+// not repeated for every primary PFP candidate row.
+bool StoreFullGeantTrajectory(simb::MCParticle const &particle,
+                              std::vector<double> &x,
+                              std::vector<double> &y,
+                              std::vector<double> &z) {
+  x.clear();
+  y.clear();
+  z.clear();
+  for (std::size_t index = 0; index < particle.NumberTrajectoryPoints();
+       ++index) {
+    auto const position = particle.Position(index);
+    Point3D const point{position.X(), position.Y(), position.Z()};
+    if (!IsFinite(point)) continue;
+    x.push_back(point.x);
+    y.push_back(point.y);
+    z.push_back(point.z);
+  }
+  return !x.empty() && x.size() == y.size() && x.size() == z.size();
+}
+
 // The lower-Z endpoint is the TPC entry convention for this beam geometry.
-// Use only the first requested path length after that entry; this deliberately
-// avoids both Track::StartDirection() and the full start-to-end chord.
+// The first requested path length after that entry defines an optional local
+// chord diagnostic; the nominal cosine uses the fitted endpoint tangent.
 TPCEntryDirection FindTPCEntryDirection(recob::Track const &track,
                                         double const requestedLengthCm) {
   TPCEntryDirection result;
-  if (!std::isfinite(requestedLengthCm) || requestedLengthCm <= 0.) {
-    return result;
-  }
-
   std::size_t first = track.NumberTrajectoryPoints();
   std::size_t last = track.NumberTrajectoryPoints();
   for (std::size_t index = 0; index < track.NumberTrajectoryPoints(); ++index) {
@@ -220,6 +256,11 @@ TPCEntryDirection FindTPCEntryDirection(recob::Track const &track,
   auto const entryLocation = track.LocationAtPoint(entryIndex);
   result.entry = {entryLocation.X(), entryLocation.Y(), entryLocation.Z()};
   if (!IsFinite(result.entry)) {
+    return result;
+  }
+  result.entryAtTrackEnd = enterFromLast;
+  // Entry position remains useful even if no finite local chord can be made.
+  if (!std::isfinite(requestedLengthCm) || requestedLengthCm <= 0.) {
     return result;
   }
 
@@ -262,8 +303,20 @@ TPCEntryDirection FindTPCEntryDirection(recob::Track const &track,
     }
     previous = current;
   }
-  // A short track does not silently use a different direction definition.
-  return TPCEntryDirection{};
+  // A short track has a valid entry position but no local-chord direction.
+  return result;
+}
+
+// Match the SP BeamCuts convention: orient the reconstructed fitted endpoint
+// tangent from the lower-Z end into the TPC.  This is the nominal cosine
+// direction; the local chord remains an independent diagnostic below.
+Direction3D OrientedTrackEntryDirection(recob::Track const &track,
+                                        bool const entryAtTrackEnd) {
+  auto const fittedDirection =
+      entryAtTrackEnd ? track.EndDirection() : track.StartDirection();
+  double const sign = entryAtTrackEnd ? -1. : 1.;
+  return {sign * fittedDirection.X(), sign * fittedDirection.Y(),
+          sign * fittedDirection.Z()};
 }
 
 // Preserve the full reconstructed trajectory in the same lower-Z-entry order
@@ -351,6 +404,9 @@ TruthBeamReference FindTruthBeamReference(
   result.geantMatchUnique = geantMatches == 1;
   if (!result.geantMatchUnique) return result;
   result.geantTrackId = geant->TrackId();
+  result.fullTrajectoryValid = StoreFullGeantTrajectory(
+      *geant, result.fullTrajectoryXcm, result.fullTrajectoryYcm,
+      result.fullTrajectoryZcm);
   StoreGeantTrajectoryInZRange(*geant, std::max(0., minimumZcm), maximumZcm,
                                result.trajectoryXcm, result.trajectoryYcm,
                                result.trajectoryZcm);
@@ -411,7 +467,11 @@ public:
             p.get<double>("BeamInstrumentationNominalMomentumGeV")),
         evaluateDataPid_(p.get<bool>("EvaluateDataPID", false)),
         requireDataTrigger_(p.get<bool>("RequireGoodDataTrigger", true)),
-        mcTruthBeamOrigin_(p.get<int>("MCTruthBeamOrigin", 4)),
+        // The default is the named simb beam-MC convention rather than its
+        // current integer representation (4). FHiCL may still override it
+        // for a production that uses a different MCTruth origin.
+        mcTruthBeamOrigin_(p.get<int>(
+            "MCTruthBeamOrigin", static_cast<int>(simb::kSingleParticle))),
         mcCosmicOrigin_(p.get<int>("MCCosmicOrigin", 2)),
         mcTruthGeantEnergyToleranceGeV_(
             p.get<double>("MCTruthGeantEnergyToleranceGeV", 1.e-5)),
@@ -525,10 +585,17 @@ private:
     unsigned int trackAssociationCount = 0;
     unsigned int showerAssociationCount = 0;
     // Validity of the physical TPC reference used by match diagnostics. These
-    // are not selection gates: a short track may still retain a valid Vertex
-    // residual even when it has no local direction measurement.
+    // are not selection gates: a short track may still retain a valid lower-Z
+    // trajectory-entry residual even when it has no local-chord measurement.
     bool recoStartValid = false;
+    bool tpcEntryPositionValid = false;
+    // Nominal track cosine uses the fitted endpoint tangent, oriented inward
+    // from the lower-Z entry as in the SP BeamCuts implementation.
+    bool tpcEntryEndpointDirectionValid = false;
+    // The local chord is retained independently for direction-systematic
+    // studies; it never replaces the nominal endpoint tangent.
     bool tpcEntryDirectionValid = false;
+    bool localChordDirectionMatchValid = false;
     // Beam--TPC diagnostic observables. Position residuals require a reference
     // and reco start; cosine additionally requires both directions.
     double dx = std::numeric_limits<double>::quiet_NaN();
@@ -536,6 +603,7 @@ private:
     double dz = std::numeric_limits<double>::quiet_NaN();
     double startz = std::numeric_limits<double>::quiet_NaN();
     double cos = std::numeric_limits<double>::quiet_NaN();
+    double localChordDirectionCosine = std::numeric_limits<double>::quiet_NaN();
     // Track/Shower::Length is the native reconstructed-object length in cm.
     double recoObjectLengthCm = std::numeric_limits<double>::quiet_NaN();
     unsigned int recoTruthHitSharedCount = 0;
@@ -553,25 +621,41 @@ private:
     double beamlineStartXcm = std::numeric_limits<double>::quiet_NaN();
     double beamlineStartYcm = std::numeric_limits<double>::quiet_NaN();
     double beamlineStartZcm = std::numeric_limits<double>::quiet_NaN();
-    // TPC reference coordinates. This is Track::Vertex() for tracks and
-    // ShowerStart() for showers; it is the position used for SP-compatible
-    // residual definitions.
+    // Legacy reconstructed-object position: Track::Vertex() for tracks and
+    // ShowerStart() for showers. It is preserved for direct comparison with
+    // the physical lower-Z entry used by the nominal beam--TPC residual.
     double recoStartXcm = std::numeric_limits<double>::quiet_NaN();
     double recoStartYcm = std::numeric_limits<double>::quiet_NaN();
     double recoStartZcm = std::numeric_limits<double>::quiet_NaN();
-    // The lower-Z trajectory point remains separate: it anchors the local
-    // track direction and is not silently substituted as the residual start.
+    // The lower-Z trajectory point is the track beam--TPC position reference
+    // and anchors its local entry direction. For showers it is ShowerStart().
     double tpcEntryXcm = std::numeric_limits<double>::quiet_NaN();
     double tpcEntryYcm = std::numeric_limits<double>::quiet_NaN();
     double tpcEntryZcm = std::numeric_limits<double>::quiet_NaN();
+    double tpcEntryEndpointDirectionX =
+        std::numeric_limits<double>::quiet_NaN();
+    double tpcEntryEndpointDirectionY =
+        std::numeric_limits<double>::quiet_NaN();
+    double tpcEntryEndpointDirectionZ =
+        std::numeric_limits<double>::quiet_NaN();
+    // Local lower-Z-entry chord direction, retained for direct comparison to
+    // the nominal fitted endpoint tangent above.
     double tpcEntryDirectionX = std::numeric_limits<double>::quiet_NaN();
     double tpcEntryDirectionY = std::numeric_limits<double>::quiet_NaN();
     double tpcEntryDirectionZ = std::numeric_limits<double>::quiet_NaN();
     double tpcEntryDirectionSampledLengthCm =
         std::numeric_limits<double>::quiet_NaN();
-    std::vector<double> trackTrajectoryXcm;
-    std::vector<double> trackTrajectoryYcm;
-    std::vector<double> trackTrajectoryZcm;
+  };
+  // Transient result shared by the all-track event inventory and the richer
+  // selected-track annotation. MCParticle pointers remain event-local.
+  struct TrackTruthMatch {
+    bool evaluated = false;
+    simb::MCParticle const *utilityParticle = nullptr;
+    simb::MCParticle const *hitParticle = nullptr;
+    bool originValid = false;
+    int origin = -1;
+    std::size_t sharedHitCount = 0;
+    std::size_t sharedDeltaRayHitCount = 0;
   };
   // Initializes every event summary/output member before any product lookup.
   // This prevents an unavailable current-event quantity from inheriting a
@@ -595,10 +679,14 @@ private:
       BeamInstrumentationRecord const &dataBeamReference);
   // Applies event-wide uniqueness after all candidate-local gates are known.
   void SelectUniqueEventCandidate(std::vector<Candidate> &candidates);
+  std::vector<TrackTruthMatch> BuildRecoTrackInventory(
+      art::Event const &, RecoPFPInputs const &);
   // MC-only post-selection diagnostic. It labels only the selected track and
   // cannot alter the already-complete nominal decision.
-  void AnnotateSelectedTrackTruth(art::Event const &evt,
-                                  std::vector<Candidate> &candidates);
+  void AnnotateSelectedTrackTruth(
+      art::Event const &evt, RecoPFPInputs const &inputs,
+      std::vector<TrackTruthMatch> const &trackTruthMatches,
+      std::vector<Candidate> &candidates);
   void LogSelectionResult();
   // CandidateTree binds module-owned `out_`, so copy each completed transient
   // candidate immediately before Fill rather than rebinding any addresses.
@@ -643,7 +731,11 @@ private:
   bool simulatedInstrumentationProductAvailable_ = false;
   bool simulatedInstrumentationBeamEventUnique_ = false;
   bool simulatedInstrumentationBeamTrackUnique_ = false;
+  // Preserve the stored simulated-BI start independently for future
+  // beamline/Geant studies. It is diagnostic only and not drawn by default.
+  bool simulatedInstrumentationStartValid_ = false;
   bool simulatedInstrumentationReferenceValid_ = false;
+  Point3D simulatedInstrumentationStart_;
   Point3D simulatedInstrumentationEnd_;
   Direction3D simulatedInstrumentationEndDirection_;
   std::vector<double> simulatedInstrumentationMomentaGeV_;
@@ -667,6 +759,16 @@ private:
                                    std::numeric_limits<double>::quiet_NaN()};
   std::vector<double> truthBeamTrajectoryXcm_, truthBeamTrajectoryYcm_,
       truthBeamTrajectoryZcm_;
+  // MC-only full transported trajectory for event-level candidate displays.
+  bool truthBeamFullTrajectoryValid_ = false;
+  std::vector<double> truthBeamFullTrajectoryXcm_, truthBeamFullTrajectoryYcm_,
+      truthBeamFullTrajectoryZcm_;
+  bool truthGeantParticleInventoryAvailable_ = false;
+  std::vector<int> truthGeantTrackIds_, truthGeantMotherTrackIds_,
+      truthGeantPdgs_;
+  std::vector<unsigned long long> truthGeantTrajectoryOffsets_;
+  std::vector<double> truthGeantTrajectoryXcm_, truthGeantTrajectoryYcm_,
+      truthGeantTrajectoryZcm_;
   bool pfpMetadataAssociationAvailable_ = false;
   bool pfpSliceAssociationAvailable_ = false;
   bool pfpTrackAssociationAvailable_ = false;
@@ -679,6 +781,15 @@ private:
       nPassing_ = 0, nPassingTrack_ = 0, nPassingShower_ = 0,
       selectedPfp_ = -1, selectedTrack_ = -1, selectedShower_ = -1,
       selectedCandidateType_ = kCandidateNone;
+  // One normalized, event-level inventory owns every reco-track trajectory.
+  // Offsets has Ntracks+1 entries; track i occupies [offsets[i], offsets[i+1]).
+  std::vector<int> recoTrackIndices_, recoTrackInBeamSlice_;
+  std::vector<int> recoTrackCosmicClassificationValid_, recoTrackIsCosmic_;
+  std::vector<int> recoTrackTruthUtilityMatchValid_, recoTrackTruthUtilityPdg_;
+  std::vector<int> recoTrackTruthHitMatchValid_, recoTrackTruthHitPdg_;
+  std::vector<unsigned long long> recoTrackTrajectoryOffsets_;
+  std::vector<double> recoTrackTrajectoryXcm_, recoTrackTrajectoryYcm_,
+      recoTrackTrajectoryZcm_;
   Candidate out_;
   // Residuals are retained for HD cut development, not applied in this module.
   bool beamTpcMatchUsedForSelection_ = false;
@@ -739,6 +850,14 @@ void PDHDBeamSelectionStages::beginJob() {
             simulatedInstrumentationBeamTrackUnique_);
   AddBranch(*eventTree_, "simulated_instrumentation_reference_valid",
             simulatedInstrumentationReferenceValid_);
+  AddBranch(*eventTree_, "simulated_instrumentation_start_valid",
+            simulatedInstrumentationStartValid_);
+  AddBranch(*eventTree_, "simulated_instrumentation_start_x_cm",
+            simulatedInstrumentationStart_.x);
+  AddBranch(*eventTree_, "simulated_instrumentation_start_y_cm",
+            simulatedInstrumentationStart_.y);
+  AddBranch(*eventTree_, "simulated_instrumentation_start_z_cm",
+            simulatedInstrumentationStart_.z);
   AddBranch(*eventTree_, "simulated_instrumentation_end_x_cm",
             simulatedInstrumentationEnd_.x);
   AddBranch(*eventTree_, "simulated_instrumentation_end_y_cm",
@@ -785,6 +904,30 @@ void PDHDBeamSelectionStages::beginJob() {
   AddBranch(*eventTree_, "truth_beam_direction_x", truthBeamDirection_.x);
   AddBranch(*eventTree_, "truth_beam_direction_y", truthBeamDirection_.y);
   AddBranch(*eventTree_, "truth_beam_direction_z", truthBeamDirection_.z);
+  AddBranch(*eventTree_, "truth_beam_full_trajectory_valid",
+            truthBeamFullTrajectoryValid_);
+  AddBranch(*eventTree_, "truth_beam_full_trajectory_x_cm",
+            truthBeamFullTrajectoryXcm_);
+  AddBranch(*eventTree_, "truth_beam_full_trajectory_y_cm",
+            truthBeamFullTrajectoryYcm_);
+  AddBranch(*eventTree_, "truth_beam_full_trajectory_z_cm",
+            truthBeamFullTrajectoryZcm_);
+  // Event-local Geant inventory for direct-daughter topology studies. This is
+  // separate from the incident-beam reference above; offsets has N+1 entries.
+  AddBranch(*eventTree_, "truth_geant_particle_inventory_available",
+            truthGeantParticleInventoryAvailable_);
+  AddBranch(*eventTree_, "truth_geant_track_ids", truthGeantTrackIds_);
+  AddBranch(*eventTree_, "truth_geant_mother_track_ids",
+            truthGeantMotherTrackIds_);
+  AddBranch(*eventTree_, "truth_geant_pdgs", truthGeantPdgs_);
+  AddBranch(*eventTree_, "truth_geant_trajectory_offsets",
+            truthGeantTrajectoryOffsets_);
+  AddBranch(*eventTree_, "truth_geant_trajectory_x_cm",
+            truthGeantTrajectoryXcm_);
+  AddBranch(*eventTree_, "truth_geant_trajectory_y_cm",
+            truthGeantTrajectoryYcm_);
+  AddBranch(*eventTree_, "truth_geant_trajectory_z_cm",
+            truthGeantTrajectoryZcm_);
   AddBranch(*eventTree_, "pfp_metadata_association_available",
             pfpMetadataAssociationAvailable_);
   AddBranch(*eventTree_, "pfp_slice_association_available",
@@ -817,6 +960,30 @@ void PDHDBeamSelectionStages::beginJob() {
             tpcEntryDirectionLengthCm_);
   AddBranch(*eventTree_, "beam_tpc_match_used_for_selection",
             beamTpcMatchUsedForSelection_);
+  // Display-only all-track inventory. Trajectories are flattened so the
+  // event tree owns one copy without requiring nested-vector dictionaries.
+  AddBranch(*eventTree_, "reco_track_indices", recoTrackIndices_);
+  AddBranch(*eventTree_, "reco_track_in_pandora_beam_slice",
+            recoTrackInBeamSlice_);
+  AddBranch(*eventTree_, "reco_track_cosmic_classification_valid",
+            recoTrackCosmicClassificationValid_);
+  AddBranch(*eventTree_, "reco_track_is_cosmic", recoTrackIsCosmic_);
+  AddBranch(*eventTree_, "reco_track_truth_utility_match_valid",
+            recoTrackTruthUtilityMatchValid_);
+  AddBranch(*eventTree_, "reco_track_truth_utility_pdg",
+            recoTrackTruthUtilityPdg_);
+  AddBranch(*eventTree_, "reco_track_truth_hit_match_valid",
+            recoTrackTruthHitMatchValid_);
+  AddBranch(*eventTree_, "reco_track_truth_hit_pdg",
+            recoTrackTruthHitPdg_);
+  AddBranch(*eventTree_, "reco_track_trajectory_offsets",
+            recoTrackTrajectoryOffsets_);
+  AddBranch(*eventTree_, "reco_track_trajectory_x_cm",
+            recoTrackTrajectoryXcm_);
+  AddBranch(*eventTree_, "reco_track_trajectory_y_cm",
+            recoTrackTrajectoryYcm_);
+  AddBranch(*eventTree_, "reco_track_trajectory_z_cm",
+            recoTrackTrajectoryZcm_);
   candidateTree_ = fs->make<TTree>("BeamSelectionCandidate",
                                    "One row per primary PFParticle");
   candidateTree_->SetAutoSave(0);
@@ -838,6 +1005,14 @@ void PDHDBeamSelectionStages::beginJob() {
             simulatedInstrumentationBeamTrackUnique_);
   AddBranch(*candidateTree_, "simulated_instrumentation_reference_valid",
             simulatedInstrumentationReferenceValid_);
+  AddBranch(*candidateTree_, "simulated_instrumentation_start_valid",
+            simulatedInstrumentationStartValid_);
+  AddBranch(*candidateTree_, "simulated_instrumentation_start_x_cm",
+            simulatedInstrumentationStart_.x);
+  AddBranch(*candidateTree_, "simulated_instrumentation_start_y_cm",
+            simulatedInstrumentationStart_.y);
+  AddBranch(*candidateTree_, "simulated_instrumentation_start_z_cm",
+            simulatedInstrumentationStart_.z);
   AddBranch(*candidateTree_, "simulated_instrumentation_end_x_cm",
             simulatedInstrumentationEnd_.x);
   AddBranch(*candidateTree_, "simulated_instrumentation_end_y_cm",
@@ -940,8 +1115,8 @@ void PDHDBeamSelectionStages::beginJob() {
   AddBranch(*candidateTree_, "shower_index", out_.shower);
   // 0=none, 1=track, 2=shower, 3=ambiguous associations.
   AddBranch(*candidateTree_, "reco_candidate_type", out_.recoCandidateType);
-  // 0=unavailable, 1=Track::Vertex with a local entry direction,
-  // 2=ShowerStart/Direction.
+  // 0=unavailable, 1=legacy Track::Vertex/local direction,
+  // 2=ShowerStart/Direction, 3=lower-Z track entry/fitted endpoint tangent.
   AddBranch(*candidateTree_, "tpc_reference_method", out_.tpcReferenceMethod);
   AddBranch(*candidateTree_, "is_primary", out_.primary);
   // Direct IsTestBeam metadata remains diagnostic; the slice is nominal.
@@ -980,7 +1155,7 @@ void PDHDBeamSelectionStages::beginJob() {
   AddBranch(*candidateTree_, "direction_match_valid", out_.directionMatchValid);
   // `match_valid` is the stricter conjunction retained for compatibility.
   AddBranch(*candidateTree_, "match_valid", out_.matchValid);
-  // These explicit coordinates make the beamline-end to reconstructed-start
+  // These explicit coordinates make the beamline-end to lower-Z TPC-entry
   // residuals independently reproducible without inferring either point.
   AddBranch(*candidateTree_, "beamline_end_x_cm", out_.beamlineEndXcm);
   AddBranch(*candidateTree_, "beamline_end_y_cm", out_.beamlineEndYcm);
@@ -999,13 +1174,25 @@ void PDHDBeamSelectionStages::beginJob() {
   AddBranch(*candidateTree_, "reco_start_x_cm", out_.recoStartXcm);
   AddBranch(*candidateTree_, "reco_start_y_cm", out_.recoStartYcm);
   AddBranch(*candidateTree_, "reco_start_z_cm", out_.recoStartZcm);
-  // Track local entry is retained for its first-segment direction diagnostic.
-  // For showers it coincides with ShowerStart().
+  // Track lower-Z entry is the nominal beam--TPC position reference; for
+  // showers it coincides with ShowerStart(). `reco_start_*` remains the
+  // independent Track::Vertex() diagnostic for tracks.
+  AddBranch(*candidateTree_, "tpc_entry_position_valid",
+            out_.tpcEntryPositionValid);
   AddBranch(*candidateTree_, "tpc_entry_x_cm", out_.tpcEntryXcm);
   AddBranch(*candidateTree_, "tpc_entry_y_cm", out_.tpcEntryYcm);
   AddBranch(*candidateTree_, "tpc_entry_z_cm", out_.tpcEntryZcm);
-  // The cosine uses the beamline fitted endpoint direction and the declared
-  // local track chord or reconstructed initial shower direction.
+  // The nominal cosine uses the beamline direction and the oriented fitted
+  // Track endpoint tangent (or Shower::Direction).  The local track chord is
+  // retained in distinct branches for robustness comparisons.
+  AddBranch(*candidateTree_, "tpc_entry_endpoint_direction_valid",
+            out_.tpcEntryEndpointDirectionValid);
+  AddBranch(*candidateTree_, "tpc_entry_endpoint_direction_x",
+            out_.tpcEntryEndpointDirectionX);
+  AddBranch(*candidateTree_, "tpc_entry_endpoint_direction_y",
+            out_.tpcEntryEndpointDirectionY);
+  AddBranch(*candidateTree_, "tpc_entry_endpoint_direction_z",
+            out_.tpcEntryEndpointDirectionZ);
   AddBranch(*candidateTree_, "tpc_entry_direction_valid",
             out_.tpcEntryDirectionValid);
   AddBranch(*candidateTree_, "tpc_entry_direction_sampled_length_cm",
@@ -1016,20 +1203,21 @@ void PDHDBeamSelectionStages::beginJob() {
             out_.tpcEntryDirectionY);
   AddBranch(*candidateTree_, "tpc_entry_direction_z",
             out_.tpcEntryDirectionZ);
-  // Full valid recob::Track trajectory, ordered from lower-Z TPC entry.
-  AddBranch(*candidateTree_, "track_trajectory_x_cm", out_.trackTrajectoryXcm);
-  AddBranch(*candidateTree_, "track_trajectory_y_cm", out_.trackTrajectoryYcm);
-  AddBranch(*candidateTree_, "track_trajectory_z_cm", out_.trackTrajectoryZcm);
+  AddBranch(*candidateTree_, "local_chord_direction_match_valid",
+            out_.localChordDirectionMatchValid);
   AddBranch(*candidateTree_, "delta_x_cm", out_.dx);
   AddBranch(*candidateTree_, "delta_y_cm", out_.dy);
   // Difference of the two measured/reconstructed endpoints, not absolute Z.
   AddBranch(*candidateTree_, "delta_z_cm", out_.dz);
   AddBranch(*candidateTree_, "entrance_z_cm", out_.startz);
   AddBranch(*candidateTree_, "direction_cosine", out_.cos);
+  AddBranch(*candidateTree_, "local_chord_direction_cosine",
+            out_.localChordDirectionCosine);
   AddBranch(*candidateTree_, "is_selected", out_.selected);
   AddBranch(*candidateTree_, "is_selected_track", out_.selectedTrack);
   AddBranch(*candidateTree_, "is_selected_shower", out_.selectedShower);
   AddBranch(*candidateTree_, "beam_reference_source", referenceSource_);
+
 }
 void PDHDBeamSelectionStages::ResetEventState(art::Event const &evt) {
   ++eventsProcessed_;
@@ -1059,7 +1247,12 @@ void PDHDBeamSelectionStages::ResetEventState(art::Event const &evt) {
   simulatedInstrumentationProductAvailable_ = false;
   simulatedInstrumentationBeamEventUnique_ = false;
   simulatedInstrumentationBeamTrackUnique_ = false;
+  simulatedInstrumentationStartValid_ = false;
   simulatedInstrumentationReferenceValid_ = false;
+  simulatedInstrumentationStart_ = {
+      std::numeric_limits<double>::quiet_NaN(),
+      std::numeric_limits<double>::quiet_NaN(),
+      std::numeric_limits<double>::quiet_NaN()};
   simulatedInstrumentationEnd_ = {
       std::numeric_limits<double>::quiet_NaN(),
       std::numeric_limits<double>::quiet_NaN(),
@@ -1093,6 +1286,30 @@ void PDHDBeamSelectionStages::ResetEventState(art::Event const &evt) {
   truthBeamTrajectoryXcm_.clear();
   truthBeamTrajectoryYcm_.clear();
   truthBeamTrajectoryZcm_.clear();
+  truthBeamFullTrajectoryValid_ = false;
+  truthBeamFullTrajectoryXcm_.clear();
+  truthBeamFullTrajectoryYcm_.clear();
+  truthBeamFullTrajectoryZcm_.clear();
+  truthGeantParticleInventoryAvailable_ = false;
+  truthGeantTrackIds_.clear();
+  truthGeantMotherTrackIds_.clear();
+  truthGeantPdgs_.clear();
+  truthGeantTrajectoryOffsets_.clear();
+  truthGeantTrajectoryXcm_.clear();
+  truthGeantTrajectoryYcm_.clear();
+  truthGeantTrajectoryZcm_.clear();
+  recoTrackIndices_.clear();
+  recoTrackInBeamSlice_.clear();
+  recoTrackCosmicClassificationValid_.clear();
+  recoTrackIsCosmic_.clear();
+  recoTrackTruthUtilityMatchValid_.clear();
+  recoTrackTruthUtilityPdg_.clear();
+  recoTrackTruthHitMatchValid_.clear();
+  recoTrackTruthHitPdg_.clear();
+  recoTrackTrajectoryOffsets_.clear();
+  recoTrackTrajectoryXcm_.clear();
+  recoTrackTrajectoryYcm_.clear();
+  recoTrackTrajectoryZcm_.clear();
 }
 
 void PDHDBeamSelectionStages::AcquireBeamReference(
@@ -1140,17 +1357,41 @@ void PDHDBeamSelectionStages::AcquireBeamReference(
       simulatedInstrumentationBeamTrackUnique_ =
           simulatedInstrumentation.tracks.size() == 1;
       if (simulatedInstrumentationBeamTrackUnique_) {
+        simulatedInstrumentationStart_ =
+            simulatedInstrumentation.tracks.front().start;
         simulatedInstrumentationEnd_ =
             simulatedInstrumentation.tracks.front().end;
         simulatedInstrumentationEndDirection_ =
             simulatedInstrumentation.tracks.front().endDirection;
         simulatedInstrumentationReferenceValid_ =
             IsFinite(simulatedInstrumentationEnd_);
+        simulatedInstrumentationStartValid_ =
+            IsFinite(simulatedInstrumentationStart_);
       }
     }
     auto const truthHandle = evt.getHandle<std::vector<simb::MCTruth>>(mcTruthTag_);
     auto const particleHandle =
         evt.getHandle<std::vector<simb::MCParticle>>(mcParticleTag_);
+    truthGeantParticleInventoryAvailable_ = bool(particleHandle);
+    truthGeantTrajectoryOffsets_.push_back(0);
+    if (particleHandle) {
+      for (auto const &particle : *particleHandle) {
+        truthGeantTrackIds_.push_back(particle.TrackId());
+        truthGeantMotherTrackIds_.push_back(particle.Mother());
+        truthGeantPdgs_.push_back(particle.PdgCode());
+        for (std::size_t index = 0;
+             index < particle.NumberTrajectoryPoints(); ++index) {
+          auto const position = particle.Position(index);
+          Point3D const point{position.X(), position.Y(), position.Z()};
+          if (!IsFinite(point)) continue;
+          truthGeantTrajectoryXcm_.push_back(point.x);
+          truthGeantTrajectoryYcm_.push_back(point.y);
+          truthGeantTrajectoryZcm_.push_back(point.z);
+        }
+        truthGeantTrajectoryOffsets_.push_back(
+            static_cast<unsigned long long>(truthGeantTrajectoryXcm_.size()));
+      }
+    }
     auto const truth = FindTruthBeamReference(
         truthHandle, particleHandle, mcTruthBeamOrigin_,
         mcTruthGeantEnergyToleranceGeV_,
@@ -1172,6 +1413,10 @@ void PDHDBeamSelectionStages::AcquireBeamReference(
     truthBeamTrajectoryXcm_ = truth.trajectoryXcm;
     truthBeamTrajectoryYcm_ = truth.trajectoryYcm;
     truthBeamTrajectoryZcm_ = truth.trajectoryZcm;
+    truthBeamFullTrajectoryValid_ = truth.fullTrajectoryValid;
+    truthBeamFullTrajectoryXcm_ = truth.fullTrajectoryXcm;
+    truthBeamFullTrajectoryYcm_ = truth.fullTrajectoryYcm;
+    truthBeamFullTrajectoryZcm_ = truth.fullTrajectoryZcm;
     // The truth reference identifies a generated beam event; it never applies
     // a truth-PDG species cut to the reconstructed candidate.
     beamProductAvailable_ = truthBeamProductAvailable_;
@@ -1484,15 +1729,9 @@ PDHDBeamSelectionStages::BuildPrimaryCandidates(
       // Next derive the TPC reference from the unique reconstructed object.
       // No reference is invented for ambiguous or absent reco associations.
       if (c.recoCandidateType == kCandidateTrack) {
-        auto const trajectory = ExtractTrackTrajectoryFromEntry(*tr);
-        for (auto const &point : trajectory) {
-          c.trackTrajectoryXcm.push_back(point.x);
-          c.trackTrajectoryYcm.push_back(point.y);
-          c.trackTrajectoryZcm.push_back(point.z);
-        }
         auto const localDirection =
             FindTPCEntryDirection(*tr, tpcEntryDirectionLengthCm_);
-        c.tpcReferenceMethod = kTPCReferenceTrackVertexLocalDirection;
+        c.tpcReferenceMethod = kTPCReferenceTrackEntryLocalDirection;
         auto const vertex = tr->Vertex();
         c.recoStartXcm = vertex.X();
         c.recoStartYcm = vertex.Y();
@@ -1502,21 +1741,38 @@ PDHDBeamSelectionStages::BuildPrimaryCandidates(
         c.tpcEntryXcm = localDirection.entry.x;
         c.tpcEntryYcm = localDirection.entry.y;
         c.tpcEntryZcm = localDirection.entry.z;
+        c.tpcEntryPositionValid = IsFinite(localDirection.entry);
+        Direction3D endpointDirection{
+            std::numeric_limits<double>::quiet_NaN(),
+            std::numeric_limits<double>::quiet_NaN(),
+            std::numeric_limits<double>::quiet_NaN()};
+        if (c.tpcEntryPositionValid) {
+          endpointDirection =
+              OrientedTrackEntryDirection(*tr, localDirection.entryAtTrackEnd);
+          c.tpcEntryEndpointDirectionX = endpointDirection.x;
+          c.tpcEntryEndpointDirectionY = endpointDirection.y;
+          c.tpcEntryEndpointDirectionZ = endpointDirection.z;
+          c.tpcEntryEndpointDirectionValid =
+              IsValidDirection(endpointDirection);
+        }
         c.tpcEntryDirectionValid = localDirection.valid;
         c.tpcEntryDirectionSampledLengthCm =
             localDirection.sampledLengthCm;
-        mi.recoStartValid = c.recoStartValid;
-        mi.recoStart = {c.recoStartXcm, c.recoStartYcm, c.recoStartZcm};
-        mi.recoDirectionValid = localDirection.valid;
-        // A short track has no substituted direction, but its Vertex residual
-        // remains available when the external beamline reference is valid.
+        // Use the same lower-Z physical entry for position residuals and the
+        // fitted endpoint tangent. Track::Vertex() remains in reco_start_* as
+        // a diagnostic of the reconstruction's vertex convention.
+        mi.recoStartValid = c.tpcEntryPositionValid;
+        mi.recoStart = {c.tpcEntryXcm, c.tpcEntryYcm, c.tpcEntryZcm};
+        mi.recoDirectionValid = c.tpcEntryEndpointDirectionValid;
+        if (c.tpcEntryEndpointDirectionValid) {
+          mi.recoDirection = endpointDirection;
+        }
+        // A short track has no local-chord direction, but its lower-Z entry
+        // residual and fitted endpoint tangent remain separately available.
         if (localDirection.valid) {
           c.tpcEntryDirectionX = localDirection.direction.x;
           c.tpcEntryDirectionY = localDirection.direction.y;
           c.tpcEntryDirectionZ = localDirection.direction.z;
-          // SP TrackStart* residuals use Track::Vertex(), while the direction
-          // remains a short local chord from the physical lower-Z entry.
-          mi.recoDirection = localDirection.direction;
         }
       } else if (c.recoCandidateType == kCandidateShower) {
         // ShowerStart/Direction are Pandora's initial shower quantities; no
@@ -1534,13 +1790,18 @@ PDHDBeamSelectionStages::BuildPrimaryCandidates(
         c.tpcEntryXcm = start.X();
         c.tpcEntryYcm = start.Y();
         c.tpcEntryZcm = start.Z();
+        c.tpcEntryPositionValid = c.recoStartValid;
         c.tpcEntryDirectionX = initialDirection.x;
         c.tpcEntryDirectionY = initialDirection.y;
         c.tpcEntryDirectionZ = initialDirection.z;
         c.tpcEntryDirectionValid = c.recoStartValid &&
                                    IsValidDirection(initialDirection);
-        mi.recoStartValid = c.recoStartValid;
-        mi.recoStart = {c.recoStartXcm, c.recoStartYcm, c.recoStartZcm};
+        c.tpcEntryEndpointDirectionX = initialDirection.x;
+        c.tpcEntryEndpointDirectionY = initialDirection.y;
+        c.tpcEntryEndpointDirectionZ = initialDirection.z;
+        c.tpcEntryEndpointDirectionValid = c.tpcEntryDirectionValid;
+        mi.recoStartValid = c.tpcEntryPositionValid;
+        mi.recoStart = {c.tpcEntryXcm, c.tpcEntryYcm, c.tpcEntryZcm};
         mi.recoDirectionValid = c.tpcEntryDirectionValid;
         if (c.tpcEntryDirectionValid) {
           mi.recoDirection = initialDirection;
@@ -1557,6 +1818,18 @@ PDHDBeamSelectionStages::BuildPrimaryCandidates(
       c.dz = m.deltaZcm;
       c.startz = m.entranceZcm;
       c.cos = m.directionCosine;
+      if (c.recoCandidateType == kCandidateTrack &&
+          c.tpcEntryDirectionValid) {
+        BeamMatchInput localChordMatchInput = mi;
+        localChordMatchInput.recoDirectionValid = true;
+        localChordMatchInput.recoDirection = {
+            c.tpcEntryDirectionX, c.tpcEntryDirectionY,
+            c.tpcEntryDirectionZ};
+        auto const localChordMatch =
+            BeamSelectionAlg::EvaluateInstrumentationMatch(localChordMatchInput);
+        c.localChordDirectionMatchValid = localChordMatch.directionValid;
+        c.localChordDirectionCosine = localChordMatch.directionCosine;
+      }
       c.triggerPass = isData_ ? (requireDataTrigger_
                                       ? (triggerEvaluated_ && goodTrigger_)
                                       : true)
@@ -1626,7 +1899,9 @@ void PDHDBeamSelectionStages::SelectUniqueEventCandidate(
 }
 
 void PDHDBeamSelectionStages::AnnotateSelectedTrackTruth(
-    art::Event const &evt, std::vector<Candidate> &candidates) {
+    art::Event const &evt, RecoPFPInputs const &inputs,
+    std::vector<TrackTruthMatch> const &trackTruthMatches,
+    std::vector<Candidate> &candidates) {
   // This post-selection diagnostic cannot modify is_selected or recover a
   // rejected event.
   if (isData_ || !enableMCTrackTruthMatching_ || !truthBeamGeantMatchUnique_) {
@@ -1640,18 +1915,16 @@ void PDHDBeamSelectionStages::AnnotateSelectedTrackTruth(
   if (selected == candidates.end() || selected->track < 0) return;
 
   try {
-    auto const clockData =
-        art::ServiceHandle<detinfo::DetectorClocksService>()->DataFor(evt);
-    protoana::ProtoDUNETruthUtils truthUtils;
-    auto const tracks = evt.getHandle<std::vector<recob::Track>>(trackTag_);
-    if (!tracks || static_cast<std::size_t>(selected->track) >= tracks->size()) {
+    std::size_t const trackIndex = static_cast<std::size_t>(selected->track);
+    if (!inputs.tracks || trackIndex >= inputs.tracks->size() ||
+        trackIndex >= trackTruthMatches.size() ||
+        !trackTruthMatches[trackIndex].evaluated) {
       return;
     }
-    recob::Track const &track =
-        tracks->at(static_cast<std::size_t>(selected->track));
+    recob::Track const &track = inputs.tracks->at(trackIndex);
+    TrackTruthMatch const &truthMatch = trackTruthMatches[trackIndex];
 
-    auto const *utilityMatch = truthUtils.GetMCParticleFromRecoTrack(
-        clockData, track, evt, trackTag_.encode());
+    auto const *utilityMatch = truthMatch.utilityParticle;
     if (utilityMatch) {
       selected->recoTruthUtilityMatchValid = true;
       selected->recoTruthUtilityTrackId = utilityMatch->TrackId();
@@ -1659,14 +1932,8 @@ void PDHDBeamSelectionStages::AnnotateSelectedTrackTruth(
       selected->recoTruthUtilityMatchesBeamGeant =
           utilityMatch->TrackId() == truthBeamGeantTrackId_;
       selected->recoTruthUtilityProcess = utilityMatch->Process();
-      art::ServiceHandle<cheat::ParticleInventoryService> particleInventory;
-      auto const matchedTruth =
-          particleInventory->TrackIdToMCTruth_P(utilityMatch->TrackId());
-      if (matchedTruth) {
-        selected->recoTruthUtilityOriginValid = true;
-        selected->recoTruthUtilityOrigin =
-            static_cast<int>(matchedTruth->Origin());
-      }
+      selected->recoTruthUtilityOriginValid = truthMatch.originValid;
+      selected->recoTruthUtilityOrigin = truthMatch.origin;
       selected->recoTruthBackgroundCategory = ClassifySelectedTrackTruth(
           selected->recoTruthUtilityMatchesBeamGeant,
           selected->recoTruthUtilityOriginValid,
@@ -1683,24 +1950,25 @@ void PDHDBeamSelectionStages::AnnotateSelectedTrackTruth(
     }
 
     // Standard shared-hit match preserves the established hit-match branches.
-    auto const hitMatch = truthUtils.GetMCParticleByHits(
-        clockData, track, evt, trackTag_.encode(), truthHitTag_.encode());
-    if (hitMatch.particle) {
+    if (truthMatch.hitParticle) {
       selected->recoTruthHitMatchValid = true;
-      selected->recoTruthHitTrackId = hitMatch.particle->TrackId();
-      selected->recoTruthHitPdg = hitMatch.particle->PdgCode();
+      selected->recoTruthHitTrackId = truthMatch.hitParticle->TrackId();
+      selected->recoTruthHitPdg = truthMatch.hitParticle->PdgCode();
       selected->recoTruthHitSharedCount = static_cast<unsigned int>(
-          std::min(hitMatch.nSharedHits,
+          std::min(truthMatch.sharedHitCount,
                    static_cast<std::size_t>(
                        std::numeric_limits<unsigned int>::max())));
       selected->recoTruthHitSharedDeltaRayCount = static_cast<unsigned int>(
-          std::min(hitMatch.nSharedDeltaRayHits,
+          std::min(truthMatch.sharedDeltaRayHitCount,
                    static_cast<std::size_t>(
                        std::numeric_limits<unsigned int>::max())));
       selected->recoTruthHitMatchesBeamGeant =
-          hitMatch.particle->TrackId() == truthBeamGeantTrackId_;
+          truthMatch.hitParticle->TrackId() == truthBeamGeantTrackId_;
     }
 
+    auto const clockData =
+        art::ServiceHandle<detinfo::DetectorClocksService>()->DataFor(evt);
+    protoana::ProtoDUNETruthUtils truthUtils;
     selected->recoTruthPurity =
         truthUtils.GetPurity(clockData, track, evt, trackTag_.encode());
     selected->recoTruthPurityValid = std::isfinite(selected->recoTruthPurity);
@@ -1720,6 +1988,118 @@ void PDHDBeamSelectionStages::AnnotateSelectedTrackTruth(
       ++eventMessagesEmitted_;
     }
   }
+}
+
+std::vector<PDHDBeamSelectionStages::TrackTruthMatch>
+PDHDBeamSelectionStages::BuildRecoTrackInventory(
+    art::Event const &evt, RecoPFPInputs const &inputs) {
+  std::vector<TrackTruthMatch> truthMatches;
+  recoTrackTrajectoryOffsets_.push_back(0ULL);
+  if (!inputs.tracks) return truthMatches;
+  truthMatches.resize(inputs.tracks->size());
+
+  std::set<int> beamSliceTrackIndices;
+  if (pandoraBeamSliceFound_ && inputs.pfps && inputs.slices &&
+      inputs.trackAssociations) {
+    for (std::size_t pfp = 0; pfp < inputs.pfps->size(); ++pfp) {
+      try {
+        auto const slice = inputs.slices->at(pfp);
+        if (!slice || static_cast<int>(slice->ID()) != pandoraBeamSliceId_)
+          continue;
+        for (auto const &track : inputs.trackAssociations->at(pfp)) {
+          int const index = IndexOf(*inputs.tracks, track.get());
+          if (index >= 0) beamSliceTrackIndices.insert(index);
+        }
+      } catch (std::exception const &) {
+      }
+    }
+  }
+  std::unique_ptr<detinfo::DetectorClocksData> clockData;
+  if (!isData_ && enableMCTrackTruthMatching_) {
+    try {
+      clockData = std::make_unique<detinfo::DetectorClocksData>(
+          art::ServiceHandle<detinfo::DetectorClocksService>()->DataFor(evt));
+    } catch (std::exception const &error) {
+      if (eventMessagesEmitted_ < maxEventMessages_) {
+        mf::LogWarning("PDHDBeamSelectionStages")
+            << "Could not obtain detector clocks for all-track truth labels "
+            << "in run " << run_ << ", subrun " << subrun_ << ", event "
+            << event_ << ": " << error.what();
+        ++eventMessagesEmitted_;
+      }
+    }
+  }
+  protoana::ProtoDUNETruthUtils truthUtils;
+  for (std::size_t index = 0; index < inputs.tracks->size(); ++index) {
+    recoTrackIndices_.push_back(static_cast<int>(index));
+    recoTrackInBeamSlice_.push_back(
+        beamSliceTrackIndices.count(static_cast<int>(index)) ? 1 : 0);
+    recoTrackCosmicClassificationValid_.push_back(0);
+    recoTrackIsCosmic_.push_back(0);
+    recoTrackTruthUtilityMatchValid_.push_back(0);
+    recoTrackTruthUtilityPdg_.push_back(0);
+    recoTrackTruthHitMatchValid_.push_back(0);
+    recoTrackTruthHitPdg_.push_back(0);
+
+    auto const trajectory =
+        ExtractTrackTrajectoryFromEntry(inputs.tracks->at(index));
+    for (auto const &point : trajectory) {
+      recoTrackTrajectoryXcm_.push_back(point.x);
+      recoTrackTrajectoryYcm_.push_back(point.y);
+      recoTrackTrajectoryZcm_.push_back(point.z);
+    }
+    recoTrackTrajectoryOffsets_.push_back(
+        static_cast<unsigned long long>(recoTrackTrajectoryXcm_.size()));
+
+    if (clockData) {
+      try {
+        TrackTruthMatch &truthMatch = truthMatches[index];
+        truthMatch.evaluated = true;
+        auto const *match = truthUtils.GetMCParticleFromRecoTrack(
+            *clockData, inputs.tracks->at(index), evt, trackTag_.encode());
+        truthMatch.utilityParticle = match;
+        if (match) {
+          recoTrackTruthUtilityMatchValid_.back() = 1;
+          recoTrackTruthUtilityPdg_.back() = match->PdgCode();
+          art::ServiceHandle<cheat::ParticleInventoryService> inventory;
+          auto const truth = inventory->TrackIdToMCTruth_P(match->TrackId());
+          if (truth) {
+            truthMatch.originValid = true;
+            truthMatch.origin = static_cast<int>(truth->Origin());
+            recoTrackCosmicClassificationValid_.back() = 1;
+            recoTrackIsCosmic_.back() =
+                truthMatch.origin == mcCosmicOrigin_ ? 1 : 0;
+          }
+        }
+        auto const hitMatch = truthUtils.GetMCParticleByHits(
+            *clockData, inputs.tracks->at(index), evt, trackTag_.encode(),
+            truthHitTag_.encode());
+        truthMatch.hitParticle = hitMatch.particle;
+        truthMatch.sharedHitCount = hitMatch.nSharedHits;
+        truthMatch.sharedDeltaRayHitCount = hitMatch.nSharedDeltaRayHits;
+        if (hitMatch.particle) {
+          recoTrackTruthHitMatchValid_.back() = 1;
+          recoTrackTruthHitPdg_.back() = hitMatch.particle->PdgCode();
+        }
+      } catch (std::exception const &error) {
+        truthMatches[index] = TrackTruthMatch{};
+        recoTrackCosmicClassificationValid_.back() = 0;
+        recoTrackIsCosmic_.back() = 0;
+        recoTrackTruthUtilityMatchValid_.back() = 0;
+        recoTrackTruthUtilityPdg_.back() = 0;
+        recoTrackTruthHitMatchValid_.back() = 0;
+        recoTrackTruthHitPdg_.back() = 0;
+        if (eventMessagesEmitted_ < maxEventMessages_) {
+          mf::LogWarning("PDHDBeamSelectionStages")
+              << "Could not label reco track " << index << " in run "
+              << run_ << ", subrun " << subrun_ << ", event " << event_
+              << ": " << error.what();
+          ++eventMessagesEmitted_;
+        }
+      }
+    }
+  }
+  return truthMatches;
 }
 
 void PDHDBeamSelectionStages::LogSelectionResult() {
@@ -1766,7 +2146,8 @@ void PDHDBeamSelectionStages::analyze(art::Event const &evt) {
   auto candidates = BuildPrimaryCandidates(recoInputs, dataBeamReference);
 
   SelectUniqueEventCandidate(candidates);
-  AnnotateSelectedTrackTruth(evt, candidates);
+  auto const trackTruthMatches = BuildRecoTrackInventory(evt, recoInputs);
+  AnnotateSelectedTrackTruth(evt, recoInputs, trackTruthMatches, candidates);
   LogSelectionResult();
   FillOutputTrees(candidates);
 }

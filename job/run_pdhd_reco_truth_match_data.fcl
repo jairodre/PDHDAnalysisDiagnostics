@@ -1,23 +1,34 @@
-# DATA FHiCL template for PDHDRecoTruthMatch.
+# Data runtime configuration for PDHDRecoTruthMatch.
 #
-# Bidirectional hit-based reconstruction-to-truth matching and quality metrics.
-# The analyzer remains a C++ scaffold and must not be scheduled yet. Product labels below document the intended interface and must
-# be validated against the input production before implementation.
+# It writes the same reconstructed-track and Pandora beam-slice inventory as
+# the MC job. MC matching and hierarchy branches remain explicitly invalid.
 
+#include "messageservice.fcl"
+#include "services_dune.fcl"
 #include "pdhd_analysis_diagnostics_data.fcl"
 
-BEGIN_PROLOG
+process_name: PDHDRecoTruthMatchData
 
-pdhd_reco_truth_match_data_template: {
-  module_type: "PDHDRecoTruthMatch"
-  Mode: "data"
-  ImplementationStatus: "template_only"
-  EnabledForMode: true
-  PFParticleTag: "pandora"
-  TrackTag: "pandoraTrack"
-  ShowerTag: "pandoraShower"
-  HitTag: "gaushit"
-  MCParticleTag: "largeant"
+services: {
+  TFileService: { fileName: "pdhd_reco_truth_match_data.root" }
+  message: @local::standard_info
+  WireReadout: @local::dune_wire_readout
+  Geometry: @local::protodunehdv6_geo
 }
 
-END_PROLOG
+source: {
+  module_type: RootInput
+  maxEvents: -1
+}
+
+outputs: {}
+
+physics: {
+  analyzers: {
+    recoTruthMatch: @local::pdhd_reco_truth_match
+  }
+  analysis: [recoTruthMatch]
+  end_paths: [analysis]
+}
+
+physics.analyzers.recoTruthMatch.EnableMCTruthMatching: false

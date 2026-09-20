@@ -1,23 +1,42 @@
-# MC FHiCL template for PDHDRecoTruthMatch.
+# MC runtime configuration for PDHDRecoTruthMatch.
 #
-# Bidirectional hit-based reconstruction-to-truth matching and quality metrics.
-# The analyzer remains a C++ scaffold and must not be scheduled yet. Product labels below document the intended interface and must
-# be validated against the input production before implementation.
+# The analyzer writes one event-level tree containing every Pandora track,
+# its membership in the unique IsTestBeam slice, truth contributors, and the
+# descendant Geant hierarchy of its energy-ranked match.
 
+#include "messageservice.fcl"
+#include "services_dune.fcl"
 #include "pdhd_analysis_diagnostics_mc.fcl"
 
-BEGIN_PROLOG
+process_name: PDHDRecoTruthMatchMC
 
-pdhd_reco_truth_match_mc_template: {
-  module_type: "PDHDRecoTruthMatch"
-  Mode: "mc"
-  ImplementationStatus: "template_only"
-  EnabledForMode: true
-  PFParticleTag: "pandora"
-  TrackTag: "pandoraTrack"
-  ShowerTag: "pandoraShower"
-  HitTag: "gaushit"
-  MCParticleTag: "largeant"
+services: {
+  TFileService: { fileName: "pdhd_reco_truth_match_mc.root" }
+  message: @local::standard_info
+  WireReadout: @local::dune_wire_readout
+  Geometry: @local::protodunehdv6_geo
+  DetectorClocksService: @local::protodunehd_detectorclocks
+  BackTrackerService: @local::pdsp_backtrackerservice
+  ParticleInventoryService: @local::dunefd_particleinventoryservice
 }
 
-END_PROLOG
+services.BackTrackerService.BackTracker.G4ModuleLabel: "largeant"
+services.BackTrackerService.BackTracker.SimChannelModuleLabel: "tpcrawdecoder:simpleSC"
+
+source: {
+  module_type: RootInput
+  maxEvents: -1
+}
+
+outputs: {}
+
+physics: {
+  analyzers: {
+    recoTruthMatch: @local::pdhd_reco_truth_match
+  }
+  analysis: [recoTruthMatch]
+  end_paths: [analysis]
+}
+
+physics.analyzers.recoTruthMatch.EnableMCTruthMatching: true
+physics.analyzers.recoTruthMatch.MCParticleTag: "largeant"

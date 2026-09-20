@@ -47,6 +47,8 @@ physics: {
 physics.analyzers.beamSelectionStages.MCBeamTag: "generator"
 physics.analyzers.beamSelectionStages.MCTruthTag: "generator"
 physics.analyzers.beamSelectionStages.MCParticleTag: "largeant"
+# 4 is simb::kSingleParticle in this nusimdata release: the generated
+# ProtoDUNE single-particle beam record.
 physics.analyzers.beamSelectionStages.MCTruthBeamOrigin: 4
 # MCTruth origin code for cosmic-ray backgrounds in the standard simb scheme.
 physics.analyzers.beamSelectionStages.MCCosmicOrigin: 2

@@ -59,8 +59,10 @@ physics.producers.beamevent.DebugTOFs: false
 physics.producers.beamevent.ForceRead: false
 physics.producers.beamevent.MatchTime: true
 physics.producers.beamevent.SkipLLT: true
-# Data comparison reference: reconstructed external beamline fitted endpoint.
-physics.analyzers.beamSelectionStages.TPCEntryDirectionLengthCm: 15.0
+# The local TPC-entry chord is a diagnostic only.  Keep its 5-cm definition
+# identical in data and MC so its comparison branch has one meaning.
+# The nominal cosine instead uses the oriented fitted Track endpoint tangent.
+physics.analyzers.beamSelectionStages.TPCEntryDirectionLengthCm: 5.0
 # The default launcher data query is run 28547 (1 GeV/c).  Store its measured
 # beam-instrumentation momentum and CERN-calibrated PID hypotheses as
 # diagnostics; neither is a selection cut.

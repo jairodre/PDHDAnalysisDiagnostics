@@ -26,7 +26,7 @@ means the source contains design requirements but no registered art plugin.
 | `PDHDShowerFeatureInventory` | Shower energy and classifiers | Both | Template |
 | `PDHDCalorimetryPointInventory` | Per-point track/shower calorimetry | Both | Template |
 | `PDHDRecoAssociation` | Normalized reconstructed-object edges | Both | Template |
-| `PDHDRecoTruthMatch` | Bidirectional hit-based matching | MC | Template |
+| `PDHDRecoTruthMatch` | Track-to-truth contributors and Geant reaction chains | Both | Implemented; build pending |
 | `PDHDBlipInventory` | Blip geometry, charge, and energy | Both | Template |
 | `PDHDBlipAssociation` | Blip-to-object and blip-to-truth edges | Both/MC | Template |
 | `PDHDBeamSelectionStages` | Data-like beam decisions and MC metrics | Both | Implemented, unbuilt |
@@ -220,12 +220,17 @@ existence does not establish physics correctness. Validation: scaffold only.
 
 ### PDHDRecoTruthMatch
 
-Records all retained reco-to-truth and truth-to-reco matches, shared evidence,
-purity, completeness, ranks, ambiguity, delta-ray policy, and method provenance.
-It prefers configured standard BackTrackerMatchingData associations, then a
-reviewed ProtoDUNETruthUtils/BackTracker path. Output includes staged truth-beam
-reconstruction flags. Limitation: MC-only; all denominators require explicit
-definitions. Validation: scaffold only.
+Writes one event-level tree containing every configured `recob::Track`, its
+Pandora PFParticle association count, and membership in the event's unique
+`IsTestBeam` slice. In MC it calls `ProtoDUNETruthUtils` directly for complete
+energy-ranked and hit-ranked contributor lists, standard utility purity and
+completeness, and ParticleInventoryService-linked Geant descendants of the
+energy-ranked match. Flattened offsets preserve track-to-match,
+track-to-hierarchy, parent-to-daughter, and trajectory relationships without a
+second tree. Data retains the same reconstructed inventory and explicitly marks
+truth-only fields unavailable. Limitation: reaction chains are the configured
+`MCParticleTag` Geant record, not a theoretical interaction classification.
+Validation: static implementation only; user build and sample validation pending.
 
 ### PDHDBlipInventory
 
