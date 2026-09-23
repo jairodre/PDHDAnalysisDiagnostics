@@ -26,7 +26,7 @@ means the source contains design requirements but no registered art plugin.
 | `PDHDShowerFeatureInventory` | Shower energy and classifiers | Both | Template |
 | `PDHDCalorimetryPointInventory` | Per-point track/shower calorimetry | Both | Template |
 | `PDHDRecoAssociation` | Normalized reconstructed-object edges | Both | Template |
-| `PDHDRecoTruthMatch` | Track-to-truth contributors and Geant reaction chains | Both | Implemented; build pending |
+| `PDHDRecoTruthMatch` | Track-to-truth contributors and event-wide MCParticle inventory | Both | Implemented; build pending |
 | `PDHDBlipInventory` | Blip geometry, charge, and energy | Both | Template |
 | `PDHDBlipAssociation` | Blip-to-object and blip-to-truth edges | Both/MC | Template |
 | `PDHDBeamSelectionStages` | Data-like beam decisions and MC metrics | Both | Implemented, unbuilt |
@@ -223,13 +223,13 @@ existence does not establish physics correctness. Validation: scaffold only.
 Writes one event-level tree containing every configured `recob::Track`, its
 Pandora PFParticle association count, and membership in the event's unique
 `IsTestBeam` slice. In MC it calls `ProtoDUNETruthUtils` directly for complete
-energy-ranked and hit-ranked contributor lists, standard utility purity and
-completeness, and ParticleInventoryService-linked Geant descendants of the
-energy-ranked match. Flattened offsets preserve track-to-match,
-track-to-hierarchy, parent-to-daughter, and trajectory relationships without a
-second tree. Data retains the same reconstructed inventory and explicitly marks
-truth-only fields unavailable. Limitation: reaction chains are the configured
-`MCParticleTag` Geant record, not a theoretical interaction classification.
+energy-ranked and hit-ranked contributor lists and standard utility purity and
+completeness. In MC it also saves every configured `MCParticleTag` particle,
+including particles without a reco match, with TrackID/mother genealogy,
+processes, trajectory-point count, MCTruth-origin validity/value, and separate
+energy/hit reco-match counts. Flattened XYZ trajectory offsets preserve paths;
+per-point Geant momentum is intentionally not stored. Data retains the same
+reconstructed inventory and explicitly marks truth-only fields unavailable.
 Validation: static implementation only; user build and sample validation pending.
 
 ### PDHDBlipInventory

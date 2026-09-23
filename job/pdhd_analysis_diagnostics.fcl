@@ -120,7 +120,6 @@ pdhd_reco_truth_match: {
   HitTag: "gaushit"
   MCParticleTag: "largeant"
   EnableMCTruthMatching: false
-  MaximumHierarchyDepth: 1000
   MaxEventMessages: 3
 }
 

@@ -14,7 +14,7 @@ decisions independently auditable in data and Monte Carlo.
   decisions without using MC truth to accept events.
 - `PDHDRecoTruthMatch` records all reconstructed tracks, their Pandora
   beam-slice membership, MC contributors, standard purity/completeness, and
-  matched Geant descendant chains in one event-level tree.
+  an event-wide MCParticle inventory in one event-level tree.
 - Additional inventory, association, calorimetry, blip, cosmic, and truth
   modules are present as documented templates for incremental implementation.
 
